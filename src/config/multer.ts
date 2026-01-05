@@ -1,6 +1,7 @@
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 
 /**
  * Multer Configuration for Video Upload
@@ -13,9 +14,17 @@ import fs from 'fs';
  */
 
 // Create uploads directory if it doesn't exist
-const uploadDir = path.join(__dirname, '../../uploads');
+// Create uploads directory
+// On Vercel (serverless), we must use /tmp as it's the only writable directory
+const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME;
+const uploadDir = isServerless ? os.tmpdir() : path.join(__dirname, '../../uploads');
+
 if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
+    try {
+        fs.mkdirSync(uploadDir, { recursive: true });
+    } catch (error) {
+        console.warn(`Failed to create upload dir at ${uploadDir}, using /tmp instead`, error);
+    }
 }
 
 /**
