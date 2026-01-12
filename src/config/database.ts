@@ -19,10 +19,11 @@ const pool = new Pool({
     user: process.env.DB_USER || 'postgres',
     password: process.env.DB_PASSWORD,
 
-    // SSL configuration for Neon (cloud PostgreSQL)
-    ssl: {
+    // SSL configuration - only enable for cloud databases (like Neon)
+    // For local PostgreSQL, set DB_SSL=false or leave it unset
+    ssl: process.env.DB_SSL === 'true' ? {
         rejectUnauthorized: false
-    },
+    } : false,
 
     // Maximum number of clients in the pool
     // Don't set this too high or you'll run out of database connections

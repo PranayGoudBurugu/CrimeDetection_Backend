@@ -4,7 +4,8 @@ import {
     getAnalysis,
     getAnalysisHistory,
     getAnalysisById,
-    deleteAnalysis
+    deleteAnalysis,
+    getModelsInfo
 } from '../controllers/analysisController';
 
 /**
@@ -18,17 +19,19 @@ const router = express.Router();
 /**
  * POST /getanalysis
  * 
- * Upload a video and get analysis from Gemini AI
+ * Upload a video and get analysis from AI model
  * 
  * Request: multipart/form-data
  *  - video: video file (required)
- *  - prompt: custom analysis prompt (optional)
+ *  - modelType: 'gemini' or 'local' (optional, default: 'gemini')
+ *  - prompt: custom analysis prompt (optional, only for Gemini)
  * 
  * Response: JSON with analysis results
  * 
  * Example using curl:
  * curl -X POST http://localhost:5005/getanalysis \
  *   -F "video=@/path/to/video.mp4" \
+ *   -F "modelType=gemini" \
  *   -F "prompt=Analyze this dance performance"
  */
 router.post('/getanalysis', upload.single('video'), getAnalysis);
@@ -64,5 +67,16 @@ router.get('/analysis/:id', getAnalysisById);
  * Example: DELETE /analysis/1
  */
 router.delete('/analysis/:id', deleteAnalysis);
+
+/**
+ * GET /models
+ * 
+ * Get information about available models (Gemini and local)
+ * 
+ * Response: JSON with model information and availability
+ * 
+ * Example: GET /models
+ */
+router.get('/models', getModelsInfo);
 
 export default router;

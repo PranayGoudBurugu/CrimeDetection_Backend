@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import pool, { testConnection } from './config/database';
 import analysisRoutes from './routes/analysisRoutes';
+import settingsRoutes from './routes/settingsRoutes';
 import { handleMulterError, handleError, handle404 } from './middleware/errorHandler';
 
 // Load environment variables
@@ -107,6 +108,10 @@ app.get('/health', async (req: Request, res: Response) => {
 
 // Analysis routes (all video analysis endpoints)
 app.use('/', analysisRoutes);
+
+// Settings routes (application settings management)
+app.use('/', settingsRoutes);
+
 
 // ============================================
 // ERROR HANDLING MIDDLEWARE

@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
 import pool from '../config/database';
-import { analyzeVideoWithML } from '../services/mlService';
 import { createAnnotatedVideo, generateSubtitleFile } from '../services/videoAnnotationService';
 import { Analysis, AnalysisResponse, AnalysisListResponse, DanceAnalysisResult } from '../types';
 import path from 'path';
@@ -39,8 +38,21 @@ export const getAnalysis = async (req: Request, res: Response): Promise<void> =>
         const videoFile = req.file;
         console.log('📹 Video file received:', videoFile.originalname);
 
-        // Extract optional custom prompt from request body
+        // Extract optional custom prompt and model type from request body
         const customPrompt = req.body.prompt || null;
+        const modelType = (req.body.modelType || 'gemini') as 'gemini' | 'local';
+
+        // Validate model type
+        if (modelType !== 'gemini' && modelType !== 'local') {
+            res.status(400).json({
+                success: false,
+                message: 'Invalid model type. Must be "gemini" or "local".',
+                error: 'Invalid modelType parameter'
+            } as AnalysisResponse);
+            return;
+        }
+
+        console.log(`🎯 Using model type: ${modelType}`);
 
         // Step 1: Insert initial record into database with 'pending' status
         const insertQuery = `
@@ -49,9 +61,10 @@ export const getAnalysis = async (req: Request, res: Response): Promise<void> =>
         video_path, 
         file_size, 
         mime_type, 
+        model_type,
         status
       )
-      VALUES ($1, $2, $3, $4, 'pending')
+      VALUES ($1, $2, $3, $4, $5, 'pending')
       RETURNING id
     `;
 
@@ -59,7 +72,8 @@ export const getAnalysis = async (req: Request, res: Response): Promise<void> =>
             videoFile.originalname,
             videoFile.path,
             videoFile.size,
-            videoFile.mimetype
+            videoFile.mimetype,
+            modelType
         ];
 
         const insertResult = await pool.query(insertQuery, insertValues);
@@ -75,9 +89,11 @@ export const getAnalysis = async (req: Request, res: Response): Promise<void> =>
 
         console.log('🤖 Sending to ML API for analysis...');
 
-        // Step 3: Send video to ML API for analysis
-        const mlResponse = await analyzeVideoWithML(
+        // Step 3: Send video to appropriate ML model for analysis
+        const { analyzeVideo } = await import('../services/mlService');
+        const mlResponse = await analyzeVideo(
             videoFile.path,
+            modelType,
             customPrompt
         );
 
@@ -333,5 +349,59 @@ export const deleteAnalysis = async (req: Request, res: Response): Promise<void>
             message: 'Failed to delete analysis',
             error: error instanceof Error ? error.message : 'Unknown error'
         } as AnalysisResponse);
+    }
+};
+
+// ============================================
+// GET /models
+// Get information about available models
+// ============================================
+export const getModelsInfo = async (req: Request, res: Response): Promise<void> => {
+    try {
+        console.log('🔍 Fetching available models info');
+
+        const { getLocalModelInfo } = await import('../services/localModelService');
+        const localModelInfo = getLocalModelInfo();
+
+        const modelsInfo = {
+            gemini: {
+                name: 'Google Gemini AI',
+                type: 'gemini',
+                available: true,
+                description: 'Cloud-based AI model with advanced video understanding capabilities',
+                features: [
+                    'Multi-modal understanding',
+                    'Detailed mudra identification',
+                    'Expression and Rasa analysis',
+                    'Cohesive storyline generation'
+                ]
+            },
+            local: {
+                name: 'Local Bharatanatyam Model',
+                type: 'local',
+                available: localModelInfo.available,
+                description: localModelInfo.description,
+                modelPath: localModelInfo.modelPath,
+                features: [
+                    'MediaPipe-based pose detection',
+                    'Frame-by-frame analysis',
+                    'Custom ML pipeline',
+                    'Offline processing'
+                ]
+            }
+        };
+
+        res.status(200).json({
+            success: true,
+            data: modelsInfo
+        });
+
+    } catch (error) {
+        console.error('❌ Error fetching models info:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch models information',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
     }
 };

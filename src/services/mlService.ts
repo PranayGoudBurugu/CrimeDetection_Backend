@@ -12,9 +12,32 @@ dotenv.config();
  * It sends video files to the Gemini API and gets structured analysis results
  */
 
-// Initialize Gemini Client
-// Note: API Key must be in process.env.GEMINI_API_KEY
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+// Initialize Gemini Client with dynamic API key support
+// Will fetch from database first, then fallback to environment variable
+let ai: any = null;
+
+const getGeminiClient = async () => {
+    if (ai) return ai;
+
+    // Try to get API key from database
+    try {
+        const { getApiKey } = await import('../controllers/settingsController');
+        const apiKey = await getApiKey();
+
+        if (apiKey) {
+            const { GoogleGenAI } = await import("@google/genai");
+            ai = new GoogleGenAI({ apiKey });
+            return ai;
+        }
+    } catch (error) {
+        console.warn('Could not fetch API key from database, using environment variable');
+    }
+
+    // Fallback to environment variable
+    const { GoogleGenAI } = await import("@google/genai");
+    ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+    return ai;
+};
 
 const SYSTEM_INSTRUCTION = `
 You are an expert scholar and critic of Indian Classical Dance (focusing on Bharatanatyam, Odissi, Kathak, and Kuchipudi). 
@@ -190,7 +213,10 @@ export const analyzeVideoWithML = async (
                     console.log(`Using model: gemini-3-flash-preview (Attempt ${attempt + 1}/${MAX_RETRIES})`);
                 }
 
-                const response = await ai.models.generateContent({
+                // Get Gemini client (will fetch API key from database)
+                const geminiClient = await getGeminiClient();
+
+                const response = await geminiClient.models.generateContent({
                     model: "gemini-3-flash-preview",
                     contents: [
                         {
@@ -289,5 +315,31 @@ export const getAvailableModels = async (): Promise<string[]> => {
     } catch (error) {
         console.error("Error fetching models:", error);
         return [];
+    }
+};
+
+/**
+ * Unified video analysis function
+ * Routes to either Gemini API or local model based on modelType
+ * 
+ * @param videoPath - Full path to the video file
+ * @param modelType - 'gemini' or 'local'
+ * @param prompt - Optional custom prompt (only used for Gemini)
+ * @returns Analysis result
+ */
+export const analyzeVideo = async (
+    videoPath: string,
+    modelType: 'gemini' | 'local' = 'gemini',
+    prompt?: string
+): Promise<DanceAnalysisResult> => {
+    console.log(`🤖 Analyzing video with ${modelType} model`);
+
+    if (modelType === 'local') {
+        // Import local model service dynamically to avoid circular dependencies
+        const { analyzeVideoWithLocalModel } = await import('./localModelService');
+        return analyzeVideoWithLocalModel(videoPath);
+    } else {
+        // Use Gemini API
+        return analyzeVideoWithML(videoPath, prompt);
     }
 };
