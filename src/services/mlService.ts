@@ -19,12 +19,15 @@ let ai: any = null;
 const getGeminiClient = async () => {
     if (ai) return ai;
 
+    let apiKey: string | null | undefined;
+
     // Try to get API key from database
     try {
         const { getApiKey } = await import('../controllers/settingsController');
-        const apiKey = await getApiKey();
+        apiKey = await getApiKey();
 
         if (apiKey) {
+            console.log('ℹ️ Using Gemini API key from database');
             const { GoogleGenAI } = await import("@google/genai");
             ai = new GoogleGenAI({ apiKey });
             return ai;
@@ -34,8 +37,16 @@ const getGeminiClient = async () => {
     }
 
     // Fallback to environment variable
+    apiKey = process.env.GEMINI_API_KEY;
+
+    if (!apiKey) {
+        console.error('❌ GEMINI_API_KEY is not set in environment variables or database!');
+        throw new Error('GEMINI_API_KEY is required but not configured');
+    }
+
+    console.log('ℹ️ Using Gemini API key from environment variable');
     const { GoogleGenAI } = await import("@google/genai");
-    ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+    ai = new GoogleGenAI({ apiKey });
     return ai;
 };
 
