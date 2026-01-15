@@ -27,15 +27,17 @@ const pool = new Pool({
     } : false,
 
     // Maximum number of clients in the pool
-    // Don't set this too high or you'll run out of database connections
-    max: 20,
+    // In serverless environments (Vercel), we should keep this low (1-2)
+    // because each lambda invocation creates a new pool.
+    max: (process.env.NODE_ENV === 'production' || !!process.env.VERCEL) ? 1 : 20,
 
     // How long a client can be idle before being closed (in milliseconds)
     // 30 seconds is a good balance
     idleTimeoutMillis: 30000,
 
     // How long to wait for a connection before timing out (in milliseconds)
-    connectionTimeoutMillis: 2000,
+    // Increased to 10s to handle cold starts or network latency
+    connectionTimeoutMillis: 10000,
 });
 
 // Event listener for successful connections
