@@ -59,11 +59,15 @@ app.use((req, res, next) => {
 });
 
 // ============================================
-// DATABASE CONNECTION TEST
+// DATABASE CONNECTION TEST & INITIALIZATION
 // ============================================
-testConnection().then((success) => {
+import { initializeDatabase } from './scripts/initDb';
+
+testConnection().then(async (success) => {
   if (success) {
     console.log('✅ Database is ready');
+    // Initialize DB schema if needed
+    await initializeDatabase();
   } else {
     console.error('❌ Database connection failed. Please check your .env configuration.');
   }
