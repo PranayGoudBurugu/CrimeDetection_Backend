@@ -8,6 +8,7 @@ FFmpeg is a powerful multimedia framework used to create annotated videos with t
 
 ### macOS (Homebrew - Recommended)
 
+
 ```bash
 # Install Homebrew if you haven't already
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
