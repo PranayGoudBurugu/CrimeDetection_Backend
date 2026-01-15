@@ -3,8 +3,17 @@ import { promisify } from "util";
 import path from "path";
 import fs from "fs";
 import { DanceAnalysisResult } from "../types";
+import ffmpegStatic from "ffmpeg-static";
 
 const execAsync = promisify(exec);
+
+// Use the static FFmpeg binary (works locally and on Vercel)
+const ffmpegPath = ffmpegStatic || "ffmpeg";
+
+// Path to the bundled font file
+// We use process.cwd() to resolve the path relative to the project root
+// This is more reliable than __dirname which changes between src/ (ts-node) and dist/ (compiled)
+const FONT_PATH = path.join(process.cwd(), "src/assets/fonts/Roboto-Regular.ttf");
 
 /**
  * Video Annotation Service
@@ -36,6 +45,11 @@ const generateDrawtextFilters = (
         position = "bottom",
     } = config;
 
+    // Use a clean path for the font (handle spaces if necessary)
+    // On Vercel/serverless, absolute paths are safer.
+    // We check if the bundled font exists, otherwise fallback to system font (unlikely to work on Vercel but good for fallback)
+    const fontFile = fs.existsSync(FONT_PATH) ? FONT_PATH : "/System/Library/Fonts/Supplemental/Arial.ttf";
+
     // Calculate Y position based on preference
     const getYPosition = (lineNumber: number) => {
         const lineHeight = fontSize + 10;
@@ -64,7 +78,7 @@ const generateDrawtextFilters = (
         [line1, line2, line3].forEach((text, index) => {
             const escapedText = text.replace(/:/g, "\\:").replace(/'/g, "'\\\\\\''");
 
-            const drawtextFilter = `drawtext=fontfile=/System/Library/Fonts/Supplemental/Arial.ttf:` +
+            const drawtextFilter = `drawtext=fontfile=${fontFile}:` +
                 `text='${escapedText}':` +
                 `fontcolor=${fontColor}:` +
                 `fontsize=${fontSize}:` +
@@ -99,6 +113,8 @@ export const createAnnotatedVideo = async (
 ): Promise<string> => {
     try {
         console.log("🎬 Starting video annotation...");
+        console.log(`ℹ️ Using FFmpeg binary at: ${ffmpegPath}`);
+        console.log(`ℹ️ Using Font at: ${FONT_PATH}`);
 
         // Create output directory if it doesn't exist
         if (!fs.existsSync(outputDir)) {
@@ -115,7 +131,7 @@ export const createAnnotatedVideo = async (
 
         // Build FFmpeg command
         const ffmpegCommand = [
-            "ffmpeg",
+            `"${ffmpegPath}"`, // Use the static binary path
             "-i", `"${inputVideoPath}"`,
             "-vf", `"${drawtextFilters}"`,
             "-codec:a", "copy",
@@ -130,7 +146,8 @@ export const createAnnotatedVideo = async (
         const { stdout, stderr } = await execAsync(ffmpegCommand);
 
         if (stderr && !stderr.includes("frame=")) {
-            console.warn("FFmpeg warnings:", stderr);
+            // Just log first 200 chars to avoid clutter if it's long
+            console.warn("FFmpeg output (stderr):", stderr.substring(0, 200) + "...");
         }
 
         console.log("✅ Video annotation completed!");
@@ -140,10 +157,10 @@ export const createAnnotatedVideo = async (
     } catch (error: any) {
         console.error("❌ Video annotation failed:", error);
 
-        // Check for FFmpeg installation
+        // Check for FFmpeg installation (though static should prevent this)
         if (error.message.includes("command not found") || error.message.includes("not recognized")) {
             throw new Error(
-                "FFmpeg is not installed. Please install FFmpeg: https://ffmpeg.org/download.html"
+                "FFmpeg binary not found. Please ensure ffmpeg-static is installed."
             );
         }
 
@@ -158,11 +175,11 @@ export const createAnnotatedVideo = async (
  */
 export const checkFFmpegInstallation = async (): Promise<boolean> => {
     try {
-        await execAsync("ffmpeg -version");
-        console.log("✅ FFmpeg is installed");
+        await execAsync(`"${ffmpegPath}" -version`);
+        console.log(`✅ FFmpeg is installed at ${ffmpegPath}`);
         return true;
     } catch (error) {
-        console.error("❌ FFmpeg is not installed");
+        console.error("❌ FFmpeg is not installed or accessible");
         return false;
     }
 };
