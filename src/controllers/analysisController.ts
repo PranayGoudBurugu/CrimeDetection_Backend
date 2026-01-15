@@ -81,6 +81,24 @@ export const getAnalysis = async (req: Request, res: Response): Promise<void> =>
 
         console.log(`📝 Created analysis record with ID: ${analysisId}`);
 
+        // Step 1.5: Upload video to cloud storage (Vercel Blob in production)
+        const { uploadVideo } = await import('../services/storageService');
+        let videoUrl: string;
+
+        try {
+            videoUrl = await uploadVideo(videoFile.path, videoFile.filename);
+            console.log('☁️ Video uploaded to storage:', videoUrl);
+
+            // Update database with cloud storage URL
+            await pool.query(
+                'UPDATE analyses SET video_path = $1 WHERE id = $2',
+                [videoUrl, analysisId]
+            );
+        } catch (uploadError) {
+            console.error('⚠️ Cloud upload failed, using local path:', uploadError);
+            videoUrl = videoFile.path;
+        }
+
         // Step 2: Update status to 'processing'
         await pool.query(
             'UPDATE analyses SET status = $1 WHERE id = $2',
@@ -92,7 +110,7 @@ export const getAnalysis = async (req: Request, res: Response): Promise<void> =>
         // Step 3: Send video to appropriate ML model for analysis
         const { analyzeVideo } = await import('../services/mlService');
         const mlResponse = await analyzeVideo(
-            videoFile.path,
+            videoFile.path, // Still use local path for analysis
             modelType,
             customPrompt
         );
@@ -236,10 +254,12 @@ export const getAnalysisHistory = async (req: Request, res: Response): Promise<v
 
         console.log(`✅ Found ${result.rows.length} analysis records`);
 
-        // Map results to include stored_filename extracted from video_path
+        // Map results to include stored_filename and public video URL
+        const { getVideoUrl } = await import('../services/storageService');
         const analysesWithFilename = result.rows.map(row => ({
             ...row,
-            stored_filename: path.basename(row.video_path)
+            stored_filename: path.basename(row.video_path),
+            video_url: getVideoUrl(row.video_path), // Add public URL for frontend
         }));
 
         res.status(200).json({
@@ -329,11 +349,9 @@ export const deleteAnalysis = async (req: Request, res: Response): Promise<void>
         const deleteQuery = 'DELETE FROM analyses WHERE id = $1 RETURNING *';
         await pool.query(deleteQuery, [id]);
 
-        // Delete video file from disk
-        if (fs.existsSync(videoPath)) {
-            fs.unlinkSync(videoPath);
-            console.log('🗑️ Video file deleted from disk');
-        }
+        // Delete video file from storage (cloud or local)
+        const { deleteVideo } = await import('../services/storageService');
+        await deleteVideo(videoPath);
 
         console.log('✅ Analysis deleted successfully');
 
