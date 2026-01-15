@@ -21,7 +21,8 @@ const pool = new Pool({
 
     // SSL configuration - only enable for cloud databases (like Neon)
     // For local PostgreSQL, set DB_SSL=false or leave it unset
-    ssl: process.env.DB_SSL === 'true' ? {
+    // Automatically enable SSL in production or on Vercel
+    ssl: (process.env.DB_SSL === 'true' || process.env.NODE_ENV === 'production' || !!process.env.VERCEL) ? {
         rejectUnauthorized: false
     } : false,
 
