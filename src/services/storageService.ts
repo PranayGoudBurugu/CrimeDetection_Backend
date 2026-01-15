@@ -1,15 +1,39 @@
-import { put, del } from '@vercel/blob';
+import ImageKit from 'imagekit';
 import fs from 'fs';
 import path from 'path';
 
 /**
  * Storage Service
  * 
- * Handles file uploads to cloud storage (Vercel Blob)
+ * Handles file uploads to cloud storage (ImageKit)
  * Falls back to local storage in development
  */
 
 const isProduction = process.env.NODE_ENV === 'production' || !!process.env.VERCEL;
+
+// Initialize ImageKit client
+let imagekit: ImageKit | null = null;
+
+const getImageKitClient = () => {
+    if (imagekit) return imagekit;
+
+    const publicKey = process.env.IMAGEKIT_PUBLIC_KEY;
+    const privateKey = process.env.IMAGEKIT_PRIVATE_KEY;
+    const urlEndpoint = process.env.IMAGEKIT_URL_ENDPOINT;
+
+    if (!publicKey || !privateKey || !urlEndpoint) {
+        console.warn('⚠️ ImageKit credentials not configured, uploads will fail in production');
+        return null;
+    }
+
+    imagekit = new ImageKit({
+        publicKey,
+        privateKey,
+        urlEndpoint,
+    });
+
+    return imagekit;
+};
 
 /**
  * Upload a video file to storage
@@ -21,32 +45,27 @@ const isProduction = process.env.NODE_ENV === 'production' || !!process.env.VERC
 export const uploadVideo = async (filePath: string, filename: string): Promise<string> => {
     try {
         if (isProduction) {
-            // Use Vercel Blob in production
-            console.log('☁️ Uploading to Vercel Blob:', filename);
+            // Use ImageKit in production
+            const client = getImageKitClient();
 
-            // Use streaming for efficient upload of large files
-            const fileStream = fs.createReadStream(filePath);
+            if (!client) {
+                throw new Error('ImageKit not configured');
+            }
 
-            // Determine content type from file extension
-            const ext = path.extname(filename).toLowerCase();
-            const contentTypeMap: { [key: string]: string } = {
-                '.mp4': 'video/mp4',
-                '.mpeg': 'video/mpeg',
-                '.mov': 'video/quicktime',
-                '.avi': 'video/x-msvideo',
-                '.mkv': 'video/x-matroska',
-                '.webm': 'video/webm',
-            };
-            const contentType = contentTypeMap[ext] || 'video/mp4';
+            console.log('☁️ Uploading to ImageKit:', filename);
 
-            const blob = await put(filename, fileStream, {
-                access: 'public',
-                addRandomSuffix: false,
-                contentType: contentType,
+            // Read file as buffer for ImageKit
+            const fileBuffer = await fs.promises.readFile(filePath);
+
+            const response = await client.upload({
+                file: fileBuffer,
+                fileName: filename,
+                folder: '/mudra-videos', // Organize videos in a folder
+                useUniqueFileName: false,
             });
 
-            console.log('✅ Uploaded to Vercel Blob:', blob.url);
-            return blob.url;
+            console.log('✅ Uploaded to ImageKit:', response.url);
+            return response.url;
         } else {
             // Use local storage in development
             console.log('💾 Using local storage:', filePath);
@@ -65,11 +84,33 @@ export const uploadVideo = async (filePath: string, filename: string): Promise<s
  */
 export const deleteVideo = async (url: string): Promise<void> => {
     try {
-        if (isProduction && url.includes('vercel-storage.com')) {
-            // Delete from Vercel Blob
-            console.log('🗑️ Deleting from Vercel Blob:', url);
-            await del(url);
-            console.log('✅ Deleted from Vercel Blob');
+        if (isProduction && url.includes('ik.imagekit.io')) {
+            // Delete from ImageKit
+            const client = getImageKitClient();
+
+            if (!client) {
+                console.warn('⚠️ ImageKit not configured, cannot delete');
+                return;
+            }
+
+            // Extract fileId from URL
+            // ImageKit URLs look like: https://ik.imagekit.io/your-id/path/filename.mp4
+            const fileIdMatch = url.match(/\/([^\/]+)\.mp4$/);
+            if (fileIdMatch) {
+                const fileName = fileIdMatch[0].substring(1); // Remove leading slash
+
+                console.log('🗑️ Deleting from ImageKit:', fileName);
+
+                // List files to get fileId
+                const files = await client.listFiles({
+                    searchQuery: `name="${fileName}"`,
+                });
+
+                if (files.length > 0 && 'fileId' in files[0]) {
+                    await client.deleteFile(files[0].fileId);
+                    console.log('✅ Deleted from ImageKit');
+                }
+            }
         } else if (!isProduction) {
             // Delete from local filesystem
             if (fs.existsSync(url)) {
@@ -90,7 +131,7 @@ export const deleteVideo = async (url: string): Promise<void> => {
  * @returns Public accessible URL
  */
 export const getVideoUrl = (videoPath: string): string => {
-    // If it's already a full URL (from Vercel Blob), return as-is
+    // If it's already a full URL (from ImageKit), return as-is
     if (videoPath.startsWith('http://') || videoPath.startsWith('https://')) {
         return videoPath;
     }
