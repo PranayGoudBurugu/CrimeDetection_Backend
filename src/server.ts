@@ -63,14 +63,46 @@ app.use((req, res, next) => {
 // ============================================
 import { initializeDatabase } from './scripts/initDb';
 
-testConnection().then(async (success) => {
-  if (success) {
-    console.log('✅ Database is ready');
-    // Initialize DB schema if needed
-    await initializeDatabase();
-  } else {
-    console.error('❌ Database connection failed. Please check your .env configuration.');
+// Track database initialization status
+let dbInitPromise: Promise<void> | null = null;
+let dbInitialized = false;
+
+// Initialize database on startup
+const initDb = async () => {
+  try {
+    const success = await testConnection();
+    if (success) {
+      console.log('✅ Database is ready');
+      await initializeDatabase();
+      dbInitialized = true;
+      console.log('✅ Database initialization complete');
+    } else {
+      console.error('❌ Database connection failed. Please check your .env configuration.');
+      throw new Error('Database connection failed');
+    }
+  } catch (error) {
+    console.error('❌ Database initialization error:', error);
+    throw error;
   }
+};
+
+// Start initialization immediately
+dbInitPromise = initDb();
+
+// Middleware to ensure DB is initialized before handling requests
+app.use(async (req, res, next) => {
+  if (!dbInitialized && dbInitPromise) {
+    try {
+      await dbInitPromise;
+    } catch (error) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database is not ready',
+        error: 'Service temporarily unavailable'
+      });
+    }
+  }
+  next();
 });
 
 // ============================================
