@@ -4,6 +4,7 @@
 
 -- Drop existing tables if they exist (for clean setup)
 DROP TABLE IF EXISTS analyses CASCADE;
+DROP TABLE IF EXISTS settings CASCADE;
 
 -- ============================================
 -- ANALYSES TABLE
@@ -85,6 +86,43 @@ $$ LANGUAGE plpgsql;
 -- Trigger to automatically update updated_at
 CREATE TRIGGER update_analyses_updated_at
     BEFORE UPDATE ON analyses
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- ============================================
+-- SETTINGS TABLE
+-- ============================================
+-- This table stores application-wide settings
+-- Only one row exists (id = 1) enforced by CHECK constraint
+CREATE TABLE settings (
+    -- Primary key (always 1)
+    id INTEGER PRIMARY KEY DEFAULT 1,
+    
+    -- Default model to use for analysis
+    -- gemini: Google Gemini AI API
+    -- local: Local Python ML model (CNN)
+    default_model VARCHAR(50) DEFAULT 'gemini',
+    
+    -- Gemini API key (stored in database for admin management)
+    -- Falls back to environment variable if not set
+    gemini_api_key TEXT,
+    
+    -- Timestamp when settings were last updated
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Ensure only one settings row exists
+    CHECK (id = 1),
+    CHECK (default_model IN ('gemini', 'local'))
+);
+
+-- Insert initial default settings
+INSERT INTO settings (id, default_model, gemini_api_key)
+VALUES (1, 'gemini', NULL)
+ON CONFLICT (id) DO NOTHING;
+
+-- Trigger to update settings updated_at
+CREATE TRIGGER update_settings_updated_at
+    BEFORE UPDATE ON settings
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 

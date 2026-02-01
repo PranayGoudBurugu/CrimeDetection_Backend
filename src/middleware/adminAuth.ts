@@ -12,7 +12,8 @@ import { Request, Response, NextFunction } from 'express';
 
 // List of admin email addresses
 const ADMIN_EMAILS = [
-    'anuragnarsingoju@gmail.com'
+    'anuragnarsingoju@gmail.com',
+    'aashish17405@gmail.com'
 ];
 
 /**

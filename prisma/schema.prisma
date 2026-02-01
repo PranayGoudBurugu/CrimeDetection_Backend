@@ -1,0 +1,46 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Analysis {
+  id            Int       @id @default(autoincrement())
+  videoFilename String    @map("video_filename") @db.VarChar(500)
+  videoPath     String    @map("video_path") @db.VarChar(1000)
+  fileSize      BigInt?   @map("file_size")
+  mimeType      String?   @map("mime_type") @db.VarChar(100)
+  duration      Int?
+  modelType     String    @default("gemini") @map("model_type") @db.VarChar(50)
+  status        String    @default("pending") @db.VarChar(50)
+  mlResponse    Json?     @map("ml_response")
+  userEmail     String?   @map("user_email") @db.VarChar(255)
+  errorMessage  String?   @map("error_message") @db.Text
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+  completedAt   DateTime? @map("completed_at") @db.Timestamp(6)
+
+  @@index([status], map: "idx_analyses_status")
+  @@index([createdAt(sort: Desc)], map: "idx_analyses_created_at")
+  @@index([videoFilename], map: "idx_analyses_video_filename")
+  @@index([modelType], map: "idx_analyses_model_type")
+  @@map("analyses")
+}
+
+model Settings {
+  id           Int      @id @default(1)
+  defaultModel String   @default("gemini") @map("default_model") @db.VarChar(50)
+  geminiApiKey String?  @map("gemini_api_key") @db.Text
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  @@map("settings")
+}

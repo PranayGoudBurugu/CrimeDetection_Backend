@@ -17,37 +17,41 @@ dotenv.config();
 let ai: any = null;
 
 const getGeminiClient = async () => {
-    if (ai) return ai;
+  if (ai) return ai;
 
-    let apiKey: string | null | undefined;
+  let apiKey: string | null | undefined;
 
-    // Try to get API key from database
-    try {
-        const { getApiKey } = await import('../controllers/settingsController');
-        apiKey = await getApiKey();
+  // Try to get API key from database
+  try {
+    const { getApiKey } = await import("../controllers/settingsController");
+    apiKey = await getApiKey();
 
-        if (apiKey) {
-            console.log('ℹ️ Using Gemini API key from database');
-            const { GoogleGenAI } = await import("@google/genai");
-            ai = new GoogleGenAI({ apiKey });
-            return ai;
-        }
-    } catch (error) {
-        console.warn('Could not fetch API key from database, using environment variable');
+    if (apiKey) {
+      console.log("ℹ️ Using Gemini API key from database");
+      const { GoogleGenAI } = await import("@google/genai");
+      ai = new GoogleGenAI({ apiKey });
+      return ai;
     }
+  } catch (error) {
+    console.warn(
+      "Could not fetch API key from database, using environment variable",
+    );
+  }
 
-    // Fallback to environment variable
-    apiKey = process.env.GEMINI_API_KEY;
+  // Fallback to environment variable
+  apiKey = process.env.GEMINI_API_KEY;
 
-    if (!apiKey) {
-        console.error('❌ GEMINI_API_KEY is not set in environment variables or database!');
-        throw new Error('GEMINI_API_KEY is required but not configured');
-    }
+  if (!apiKey) {
+    console.error(
+      "❌ GEMINI_API_KEY is not set in environment variables or database!",
+    );
+    throw new Error("GEMINI_API_KEY is required but not configured");
+  }
 
-    console.log('ℹ️ Using Gemini API key from environment variable');
-    const { GoogleGenAI } = await import("@google/genai");
-    ai = new GoogleGenAI({ apiKey });
-    return ai;
+  console.log("ℹ️ Using Gemini API key from environment variable");
+  const { GoogleGenAI } = await import("@google/genai");
+  ai = new GoogleGenAI({ apiKey });
+  return ai;
 };
 
 const SYSTEM_INSTRUCTION = `
@@ -70,68 +74,76 @@ Your task is to analyze a video clip frame-by-frame and create a CONTINUOUS narr
 After analyzing all segments, create a cohesive narrative that flows naturally from one mudra to the next.
 Example: "The dancer uses Alapadma to express purity, conveying a sense of peace. The performance then transitions to Katakamukha, representing a garland and expressing love. Finally, the dancer performs Chandrakala, symbolizing calmness and serenity."
 
+
+**CONTENT VALIDATION (CRITICAL):**
+1. **Analyze the visual content first.** Determine if the video contains Indian Classical Dance (Bharatanatyam, Odissi, Kathak, Kuchipudi, etc.).
+2. **non-dance content**: If the video is a cartoon, movie clip, sports, random vlog, or anything NOT related to classical dance, set "isValid" to false and provide a reason.
+3. **If VALID**: Proceed with the full analysis as described below.
+
 Return the output strictly as a JSON object containing:
-1. The identified dance style
-2. An array of segments with proper timing
-3. A storyline that weaves together all the mudras and their meanings in sequence
+1. "isValid": boolean (true if dance, false otherwise)
+2. "rejectionReason": string (if invalid, explain why)
+3. The identified dance style (if valid)
+4. An array of segments with proper timing (if valid)
+5. A storyline that weaves together all the mudras and their meanings in sequence (if valid)
 `;
 
 /**
  * Helper to convert video file to Base64 string (for Node.js fs)
  */
 const fileToGenerativePart = async (
-    filePath: string
+  filePath: string,
 ): Promise<{ base64Data: string; mimeType: string }> => {
-    // Read the video file as buffer
-    const videoBuffer = await fs.promises.readFile(filePath);
-    const base64Data = videoBuffer.toString("base64");
+  // Read the video file as buffer
+  const videoBuffer = await fs.promises.readFile(filePath);
+  const base64Data = videoBuffer.toString("base64");
 
-    // Get file extension to determine MIME type
-    const fileExtension = filePath.split(".").pop()?.toLowerCase();
-    const mimeTypeMap: { [key: string]: string } = {
-        mp4: "video/mp4",
-        mpeg: "video/mpeg",
-        mov: "video/quicktime",
-        avi: "video/x-msvideo",
-        mkv: "video/x-matroska",
-        webm: "video/webm",
-    };
+  // Get file extension to determine MIME type
+  const fileExtension = filePath.split(".").pop()?.toLowerCase();
+  const mimeTypeMap: { [key: string]: string } = {
+    mp4: "video/mp4",
+    mpeg: "video/mpeg",
+    mov: "video/quicktime",
+    avi: "video/x-msvideo",
+    mkv: "video/x-matroska",
+    webm: "video/webm",
+  };
 
-    const mimeType = mimeTypeMap[fileExtension || "mp4"] || "video/mp4";
+  const mimeType = mimeTypeMap[fileExtension || "mp4"] || "video/mp4";
 
-    return { base64Data, mimeType };
+  return { base64Data, mimeType };
 };
 
 /**
  * Validate and fix segment timing to ensure realistic durations
  */
 const validateSegmentTiming = (segments: DanceSegment[]): DanceSegment[] => {
-    if (!segments || segments.length === 0) return segments;
+  if (!segments || segments.length === 0) return segments;
 
-    const MIN_DURATION = 1.0; // Minimum 1 second per segment
-    const sorted = [...segments].sort((a, b) => a.startTime - b.startTime);
-    const validated: DanceSegment[] = [];
+  const MIN_DURATION = 1.0; // Minimum 1 second per segment
+  const sorted = [...segments].sort((a, b) => a.startTime - b.startTime);
+  const validated: DanceSegment[] = [];
 
-    for (let i = 0; i < sorted.length; i++) {
-        const current = sorted[i];
-        const duration = current.endTime - current.startTime;
+  for (let i = 0; i < sorted.length; i++) {
+    const current = sorted[i];
+    const duration = current.endTime - current.startTime;
 
-        // If segment is too short, try to merge with next or extend
-        if (duration < MIN_DURATION && i < sorted.length - 1) {
-            const next = sorted[i + 1];
-            // Merge current with next
-            validated.push({
-                ...current,
-                endTime: next.endTime,
-                description: `${current.description} ${next.description}`,
-            });
-            i++; // Skip next since we merged it
-        } else {
-            validated.push(current);
-        }
+    // If segment is too short, try to merge with next or extend
+    if (duration < MIN_DURATION && i < sorted.length - 1) {
+      const next = sorted[i + 1];
+      // Merge current with next
+      validated.push({
+        ...current,
+        endTime: next.endTime,
+        description: `${current.description} ${next.description}`,
+      });
+      i++; // Skip next since we merged it
+    } else {
+      validated.push(current);
     }
+  }
 
-    return validated;
+  return validated;
 };
 
 /**
@@ -142,215 +154,238 @@ const validateSegmentTiming = (segments: DanceSegment[]): DanceSegment[] => {
  * @returns Gemini AI response as structured JSON
  */
 export const analyzeVideoWithML = async (
-    videoPath: string,
-    prompt?: string
+  videoPath: string,
+  prompt?: string,
 ): Promise<DanceAnalysisResult> => {
-    try {
-        console.log("🤖 Starting ML analysis for:", videoPath);
+  try {
+    console.log("🤖 Starting ML analysis for:", videoPath);
 
-        // 1. Convert video file to Base64
-        const { base64Data, mimeType } = await fileToGenerativePart(videoPath);
+    // 1. Convert video file to Base64
+    const { base64Data, mimeType } = await fileToGenerativePart(videoPath);
 
-        // 2. Define the schema for structured JSON output
-        const responseSchema = {
+    // 2. Define the schema for structured JSON output
+    const responseSchema = {
+      type: Type.OBJECT,
+      properties: {
+        isValid: {
+          type: Type.BOOLEAN,
+          description:
+            "Set to true if the video is definitely Indian Classical Dance. Set to false for cartoons, random videos, or non-dance content.",
+        },
+        rejectionReason: {
+          type: Type.STRING,
+          description:
+            "If isValid is false, explain why (e.g., 'Video is a cartoon', 'No dance detected').",
+        },
+        danceStyle: {
+          type: Type.STRING,
+          description:
+            "The likely style of dance (e.g., Bharatanatyam, Odissi). Null if invalid.",
+        },
+        segments: {
+          type: Type.ARRAY,
+          items: {
             type: Type.OBJECT,
             properties: {
-                danceStyle: {
-                    type: Type.STRING,
-                    description:
-                        "The likely style of dance (e.g., Bharatanatyam, Odissi)",
-                },
-                segments: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            startTime: {
-                                type: Type.NUMBER,
-                                description: "Start time of the gesture in seconds",
-                            },
-                            endTime: {
-                                type: Type.NUMBER,
-                                description: "End time of the gesture in seconds",
-                            },
-                            mudraName: {
-                                type: Type.STRING,
-                                description: "Sanskrit name of the Mudra or 'Transition'",
-                            },
-                            meaning: {
-                                type: Type.STRING,
-                                description: "Brief meaning or context",
-                            },
-                            expression: {
-                                type: Type.STRING,
-                                description: "Facial expression or Rasa",
-                            },
-                            description: {
-                                type: Type.STRING,
-                                description: "A continuous description of the movement",
-                            },
-                        },
-                        required: [
-                            "startTime",
-                            "endTime",
-                            "mudraName",
-                            "meaning",
-                            "expression",
-                            "description",
-                        ],
-                    },
-                },
-                storyline: {
-                    type: Type.STRING,
-                    description:
-                        "A cohesive narrative that weaves together all the mudras and their meanings in sequence, telling the story of the performance",
-                },
+              startTime: {
+                type: Type.NUMBER,
+                description: "Start time of the gesture in seconds",
+              },
+              endTime: {
+                type: Type.NUMBER,
+                description: "End time of the gesture in seconds",
+              },
+              mudraName: {
+                type: Type.STRING,
+                description: "Sanskrit name of the Mudra or 'Transition'",
+              },
+              meaning: {
+                type: Type.STRING,
+                description: "Brief meaning or context",
+              },
+              expression: {
+                type: Type.STRING,
+                description: "Facial expression or Rasa",
+              },
+              description: {
+                type: Type.STRING,
+                description: "A continuous description of the movement",
+              },
             },
-            required: ["danceStyle", "segments", "storyline"],
-        };
+            required: [
+              "startTime",
+              "endTime",
+              "mudraName",
+              "meaning",
+              "expression",
+              "description",
+            ],
+          },
+        },
+        storyline: {
+          type: Type.STRING,
+          description:
+            "A cohesive narrative that weaves together all the mudras and their meanings in sequence, telling the story of the performance",
+        },
+      },
+      required: ["isValid"],
+    };
 
-        // 3. Call Gemini API with Retry Logic
-        const MAX_RETRIES = 5;
-        const INITIAL_BACKOFF = 5000; // 5 seconds
+    // 3. Call Gemini API with Retry Logic
+    const MAX_RETRIES = 5;
+    const INITIAL_BACKOFF = 5000; // 5 seconds
 
-        let attempt = 0;
-        const customPrompt =
-            prompt ||
-            "Analyze this dance video continuously. Create segments that are AT LEAST 1.5-3 seconds long each. Each mudra or movement should have realistic timing (2-4 seconds for held poses, 1-2 seconds for transitions). Ensure captions flow seamlessly without flickering or rapid changes.";
+    let attempt = 0;
+    const customPrompt =
+      prompt ||
+      "Analyze this dance video continuously. Create segments that are AT LEAST 1.5-3 seconds long each. Each mudra or movement should have realistic timing (2-4 seconds for held poses, 1-2 seconds for transitions). Ensure captions flow seamlessly without flickering or rapid changes.";
 
-        while (attempt < MAX_RETRIES) {
-            try {
-                if (attempt > 0) {
-                    console.log(`Using model: gemini-3-flash-preview (Attempt ${attempt + 1}/${MAX_RETRIES})`);
-                }
-
-                // Get Gemini client (will fetch API key from database)
-                const geminiClient = await getGeminiClient();
-
-                const response = await geminiClient.models.generateContent({
-                    model: "gemini-3-flash-preview",
-                    contents: [
-                        {
-                            role: "user",
-                            parts: [
-                                {
-                                    inlineData: {
-                                        mimeType: mimeType,
-                                        data: base64Data,
-                                    },
-                                },
-                                {
-                                    text: customPrompt,
-                                },
-                            ],
-                        },
-                    ],
-                    config: {
-                        systemInstruction: SYSTEM_INSTRUCTION,
-                        responseMimeType: "application/json",
-                        responseSchema: responseSchema,
-                        temperature: 0.4,
-                    },
-                });
-
-                const textResponse = response.text;
-                if (!textResponse) {
-                    throw new Error("No response from AI model");
-                }
-
-                console.log("✅ ML analysis completed");
-
-                const parsed = JSON.parse(textResponse) as DanceAnalysisResult;
-
-                // Post-process: Validate and fix segment timing
-                const validatedSegments = validateSegmentTiming(parsed.segments);
-
-                return {
-                    ...parsed,
-                    segments: validatedSegments,
-                };
-
-            } catch (error: any) {
-                attempt++;
-
-                // Detailed error logging
-                console.error(`❌ Attempt ${attempt} failed:`, error?.message || error);
-
-                // Check for rate limits (429 or RESOURCE_EXHAUSTED)
-                const isRateLimit =
-                    error?.status === 429 ||
-                    error?.status === "RESOURCE_EXHAUSTED" ||
-                    /quota|rate limit/i.test(error?.message || "");
-
-                if (isRateLimit && attempt < MAX_RETRIES) {
-                    // Exponential backoff with jitter: waitTime = (base * 2^attempt) + random_jitter
-                    // Base 5s -> 10s, 20s, 40s, 80s
-                    const backoff = INITIAL_BACKOFF * Math.pow(2, attempt - 1);
-                    const jitter = Math.random() * 1000;
-                    const waitTime = backoff + jitter;
-
-                    console.warn(`⚠️ Rate limit hit. Waiting ${Math.round(waitTime / 1000)}s before retry...`);
-                    await new Promise(resolve => setTimeout(resolve, waitTime));
-                    continue;
-                }
-
-                // If not rate limit or max retries reached
-                const msg = error?.message || "";
-                if (isRateLimit) {
-                    throw new Error("Gemini free tier quota exceeded. Please wait a minute before trying again.");
-                }
-
-                throw new Error(`ML analysis failed: ${msg}`);
-            }
+    while (attempt < MAX_RETRIES) {
+      try {
+        if (attempt > 0) {
+          console.log(
+            `Using model: gemini-3-flash-preview (Attempt ${attempt + 1}/${MAX_RETRIES})`,
+          );
         }
 
-        throw new Error("Analysis failed after maximum retries");
-    } catch (error: any) {
-        console.error("❌ Final ML Service Error:", error);
-        throw error;
+        // Get Gemini client (will fetch API key from database)
+        const geminiClient = await getGeminiClient();
+
+        const response = await geminiClient.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  inlineData: {
+                    mimeType: mimeType,
+                    data: base64Data,
+                  },
+                },
+                {
+                  text: customPrompt,
+                },
+              ],
+            },
+          ],
+          config: {
+            systemInstruction: SYSTEM_INSTRUCTION,
+            responseMimeType: "application/json",
+            responseSchema: responseSchema,
+            temperature: 0.4,
+          },
+        });
+
+        const textResponse = response.text;
+        if (!textResponse) {
+          throw new Error("No response from AI model");
+        }
+
+        console.log("✅ ML analysis completed");
+
+        const parsed = JSON.parse(textResponse) as DanceAnalysisResult;
+
+        // CHECK VALIDITY FIRST
+        if (parsed.isValid === false) {
+          console.warn(`⚠️ Video rejected by ML: ${parsed.rejectionReason}`);
+          throw new Error(
+            `Video Rejected: ${parsed.rejectionReason || "Content does not appear to be Indian Classical Dance."}`,
+          );
+        }
+
+        // Post-process: Validate and fix segment timing
+        const validatedSegments = validateSegmentTiming(parsed.segments || []);
+
+        return {
+          ...parsed,
+          segments: validatedSegments,
+        };
+      } catch (error: any) {
+        attempt++;
+
+        // Detailed error logging
+        console.error(`❌ Attempt ${attempt} failed:`, error?.message || error);
+
+        // Check for rate limits (429 or RESOURCE_EXHAUSTED)
+        const isRateLimit =
+          error?.status === 429 ||
+          error?.status === "RESOURCE_EXHAUSTED" ||
+          /quota|rate limit/i.test(error?.message || "");
+
+        if (isRateLimit && attempt < MAX_RETRIES) {
+          // Exponential backoff with jitter: waitTime = (base * 2^attempt) + random_jitter
+          // Base 5s -> 10s, 20s, 40s, 80s
+          const backoff = INITIAL_BACKOFF * Math.pow(2, attempt - 1);
+          const jitter = Math.random() * 1000;
+          const waitTime = backoff + jitter;
+
+          console.warn(
+            `⚠️ Rate limit hit. Waiting ${Math.round(waitTime / 1000)}s before retry...`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, waitTime));
+          continue;
+        }
+
+        // If not rate limit or max retries reached
+        const msg = error?.message || "";
+        if (isRateLimit) {
+          throw new Error(
+            "Gemini free tier quota exceeded. Please wait a minute before trying again.",
+          );
+        }
+
+        throw new Error(`ML analysis failed: ${msg}`);
+      }
     }
+
+    throw new Error("Analysis failed after maximum retries");
+  } catch (error: any) {
+    console.error("❌ Final ML Service Error:", error);
+    throw error;
+  }
 };
 
 /**
  * Get available ML models
  */
 export const getAvailableModels = async (): Promise<string[]> => {
-    try {
-        // Available Gemini models
-        return [
-            "gemini-3-flash-preview",
-            "gemini-2.0-flash-exp",
-            "gemini-1.5-pro",
-            "gemini-1.5-flash",
-        ];
-    } catch (error) {
-        console.error("Error fetching models:", error);
-        return [];
-    }
+  try {
+    // Available Gemini models
+    return [
+      "gemini-3-flash-preview",
+      "gemini-2.0-flash-exp",
+      "gemini-1.5-pro",
+      "gemini-1.5-flash",
+    ];
+  } catch (error) {
+    console.error("Error fetching models:", error);
+    return [];
+  }
 };
 
 /**
  * Unified video analysis function
  * Routes to either Gemini API or local model based on modelType
- * 
+ *
  * @param videoPath - Full path to the video file
  * @param modelType - 'gemini' or 'local'
  * @param prompt - Optional custom prompt (only used for Gemini)
  * @returns Analysis result
  */
 export const analyzeVideo = async (
-    videoPath: string,
-    modelType: 'gemini' | 'local' = 'gemini',
-    prompt?: string
+  videoPath: string,
+  modelType: "gemini" | "local" = "gemini",
+  prompt?: string,
 ): Promise<DanceAnalysisResult> => {
-    console.log(`🤖 Analyzing video with ${modelType} model`);
+  console.log(`🤖 Analyzing video with ${modelType} model`);
 
-    if (modelType === 'local') {
-        // Import local model service dynamically to avoid circular dependencies
-        const { analyzeVideoWithLocalModel } = await import('./localModelService');
-        return analyzeVideoWithLocalModel(videoPath);
-    } else {
-        // Use Gemini API
-        return analyzeVideoWithML(videoPath, prompt);
-    }
+  if (modelType === "local") {
+    // Import local model service dynamically to avoid circular dependencies
+    const { analyzeVideoWithLocalModel } = await import("./localModelService");
+    return analyzeVideoWithLocalModel(videoPath);
+  } else {
+    // Use Gemini API
+    return analyzeVideoWithML(videoPath, prompt);
+  }
 };
