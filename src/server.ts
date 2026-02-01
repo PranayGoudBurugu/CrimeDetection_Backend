@@ -9,7 +9,6 @@ import {
   handleError,
   handle404,
 } from "./middleware/errorHandler";
-
 // Load environment variables
 dotenv.config();
 
