@@ -157,7 +157,7 @@ export const getAnalysis = async (
 
     console.log("✅ ML analysis completed");
 
-    // Step 4: Create annotated video with mudra overlays (optional)
+    // Step 4: Create annotated video with threat overlays (optional)
     let annotatedVideoPath: string | null = null;
     let subtitlePath: string | null = null;
 
@@ -218,14 +218,49 @@ export const getAnalysis = async (
 
     console.log("💾 Analysis saved to database");
 
-    // Step 6: Send response back to frontend
+    // Step 6: Check for violence threats and send SMS alert via Twilio
+    let alertSent = false;
+    try {
+      const { findViolenceAlert, sendThreatAlert } = await import("../services/twilioService");
+      const violenceAlert = findViolenceAlert(mlResponse.segments || []);
+
+      if (violenceAlert) {
+        console.log("🚨 Violence detected! Sending SMS alert...");
+
+        // Get video URL for the SMS
+        const { getVideoUrl } = await import("../services/storageService");
+        const videoLink = getVideoUrl(videoFile.path);
+
+        // Get location and alertPhone from request body (sent by frontend)
+        const location = req.body?.location || "Unknown Location";
+        const alertPhone = req.body?.alertPhone;
+
+        const smsResult = await sendThreatAlert({
+          ...violenceAlert,
+          incidentSummary: (mlResponse as DanceAnalysisResult).incidentSummary,
+          videoUrl: videoLink,
+          location: location,
+          toPhone: alertPhone,
+        });
+
+        alertSent = smsResult.success;
+        if (alertSent) {
+          console.log("✅ SMS alert sent successfully");
+        }
+      }
+    } catch (alertError) {
+      console.warn("⚠️ SMS alert failed (continuing without it):", alertError);
+    }
+
+    // Step 7: Send response back to frontend
     res.status(200).json({
       success: true,
       message: "Video analysis completed successfully",
       data: analysis as any,
       annotatedVideoPath: annotatedVideoPath,
       subtitlePath: subtitlePath,
-      storyline: (mlResponse as DanceAnalysisResult).storyline,
+      storyline: (mlResponse as DanceAnalysisResult).incidentSummary,
+      alertSent: alertSent,
     } as AnalysisResponse);
   } catch (error) {
     console.error("❌ Error during analysis:", error);
@@ -473,22 +508,22 @@ export const getModelsInfo = async (
         type: "gemini",
         available: true,
         description:
-          "Cloud-based AI model with advanced video understanding capabilities",
+          "Cloud-based AI model with advanced video understanding for threat detection",
         features: [
-          "Multi-modal understanding",
-          "Detailed mudra identification",
-          "Expression and Rasa analysis",
-          "Cohesive storyline generation",
+          "Multi-modal video analysis",
+          "Crowd detection & counting",
+          "Weapon & sharp object identification",
+          "Violence & fighting detection",
         ],
       },
       local: {
-        name: "Local Bharatanatyam Model",
+        name: "Local Detection Model",
         type: "local",
         available: localModelInfo.available,
         description: localModelInfo.description,
         modelPath: localModelInfo.modelPath,
         features: [
-          "MediaPipe-based pose detection",
+          "MediaPipe-based detection",
           "Frame-by-frame analysis",
           "Custom ML pipeline",
           "Offline processing",

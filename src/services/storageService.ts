@@ -136,7 +136,8 @@ export const getVideoUrl = (videoPath: string): string => {
         return videoPath;
     }
 
-    // For local development, construct the URL
+    // For local development, construct the URL with the backend base URL
+    const baseUrl = process.env.BACKEND_URL || 'http://localhost:5005';
     const filename = path.basename(videoPath);
-    return `/uploads/${filename}`;
+    return `${baseUrl}/uploads/${filename}`;
 };

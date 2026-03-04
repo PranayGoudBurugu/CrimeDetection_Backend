@@ -114,10 +114,10 @@ const initDb = async () => {
 app.get("/", (req: Request, res: Response) => {
   res.json({
     success: true,
-    message: "Nrithya Analysis API is running",
+    message: "CrimeWatch AI API is running",
     version: "1.0.0",
     endpoints: {
-      analysis: "POST /getanalysis - Upload video for analysis",
+      analysis: "POST /getanalysis - Upload video for threat analysis",
       history: "GET /history - Get analysis history",
       getById: "GET /analysis/:id - Get specific analysis",
       delete: "DELETE /analysis/:id - Delete analysis",
@@ -168,7 +168,7 @@ app.use(handleError);
 app.listen(PORT, () => {
   console.log("");
   console.log("═══════════════════════════════════════════");
-  console.log("🚀 Nrithya Analysis Backend Server Started");
+  console.log("🚀 CrimeWatch AI Backend Server Started");
   console.log(`📍 Server:    http://localhost:${PORT}`);
   console.log("═══════════════════════════════════════════");
   console.log("");

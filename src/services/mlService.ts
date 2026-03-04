@@ -1,19 +1,18 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import fs from "fs";
 import dotenv from "dotenv";
-import { DanceAnalysisResult, DanceSegment } from "../types";
+import { ThreatAnalysisResult, ThreatSegment } from "../types";
 
 dotenv.config();
 
 /**
- * ML AI Service
+ * ML AI Service - CrimeWatch AI
  *
  * This service handles all interactions with Google's Gemini AI API
- * It sends video files to the Gemini API and gets structured analysis results
+ * It sends CCTV video files to the Gemini API and gets structured threat analysis results
  */
 
 // Initialize Gemini Client with dynamic API key support
-// Will fetch from database first, then fallback to environment variable
 let ai: any = null;
 
 const getGeminiClient = async () => {
@@ -55,37 +54,48 @@ const getGeminiClient = async () => {
 };
 
 const SYSTEM_INSTRUCTION = `
-You are an expert scholar and critic of Indian Classical Dance (focusing on Bharatanatyam, Odissi, Kathak, and Kuchipudi). 
-Your task is to analyze a video clip frame-by-frame and create a CONTINUOUS narrative of the performance.
+You are an expert security analyst specializing in CCTV surveillance video analysis and crime detection. 
+Your task is to analyze video footage frame-by-frame and detect potential criminal or dangerous activities.
+
+**THREAT CATEGORIES TO DETECT:**
+1. **CROWD**: Unusual gathering of people, crowd formation, mob activity, stampede risk, or abnormal crowd density
+2. **WEAPON**: Sharp objects (knives, blades, scissors), guns, sticks, bats, improvised weapons, or any weapon-like objects being carried or brandished
+3. **VIOLENCE**: Physical altercations, punching, kicking, pushing, aggressive behavior, fighting between individuals or groups
+4. **SUSPICIOUS**: Unusual behavior, loitering, trespassing, vandalism, theft attempts, or any other suspicious activity
 
 **CRITICAL RULES FOR TIMING:**
 1. **NO GAPS**: The analysis must cover the video from 0.0 seconds to the very end.
 2. **CONTINUITY**: The End Time of one segment MUST be the Start Time of the next segment.
 3. **MINIMUM DURATION**: Each segment MUST be AT LEAST 1.5-3 seconds long. Do NOT create segments shorter than 1 second.
-4. **REALISTIC TIMING**: A typical mudra or pose is held for 2-4 seconds. Transitions take 1-2 seconds. Match your timing to realistic dance movements.
+4. **REALISTIC TIMING**: Match your timing to actual events in the footage. A fight sequence may last 5-10 seconds, crowd activity 3-5 seconds.
 5. **EXAMPLE TIMING**: For a 10-second video, create 3-5 segments (e.g., 0.0-2.5s, 2.5-5.0s, 5.0-7.5s, 7.5-10.0s).
 
+**SEVERITY LEVELS:**
+- **LOW**: Minor or potential concern (e.g., people gathering, someone carrying a bag suspiciously)
+- **MEDIUM**: Moderate concern requiring attention (e.g., verbal altercation, unusual crowd density)
+- **HIGH**: Significant threat requiring immediate attention (e.g., physical fight starting, sharp object visible)
+- **CRITICAL**: Immediate danger (e.g., active violence with weapons, large-scale fight, weapon being used)
+
 **CONTENT RULES:**
-1. **DEFAULT STATE**: If no specific hand gesture (Mudra) is clear, or the dancer is transitioning, label the Mudra as "Nritta / Movement" or "Transition" and describe the body posture.
-2. **Nritya & Mudras**: Identify the specific hand gestures (Samyuta and Asamyuta Hastas).
-3. **Abhinaya (Expression)**: Analyze facial expressions and the corresponding sentiment (Rasa/Bhava).
+1. **DEFAULT STATE**: If no specific threat is clear, or the scene is calm, label the threatType as "Normal Activity" or "Monitoring" and describe what is visible (people walking, empty area, etc.) with severity "LOW".
+2. **Be Specific**: Describe exactly what you see — number of people, type of object, nature of altercation.
+3. **Err on caution**: If something looks suspicious but you're not certain, still flag it with appropriate severity.
 
-**STORYLINE GENERATION:**
-After analyzing all segments, create a cohesive narrative that flows naturally from one mudra to the next.
-Example: "The dancer uses Alapadma to express purity, conveying a sense of peace. The performance then transitions to Katakamukha, representing a garland and expressing love. Finally, the dancer performs Chandrakala, symbolizing calmness and serenity."
-
+**INCIDENT SUMMARY GENERATION:**
+After analyzing all segments, create a cohesive incident summary that describes the overall security situation.
+Example: "The footage shows a normal street scene that escalates when two individuals begin a physical altercation at 5.2 seconds. A sharp object appears to be produced at 8.0 seconds, escalating the threat level to CRITICAL. Crowd gathers around the incident. Immediate security response recommended."
 
 **CONTENT VALIDATION (CRITICAL):**
-1. **Analyze the visual content first.** Determine if the video contains Indian Classical Dance (Bharatanatyam, Odissi, Kathak, Kuchipudi, etc.).
-2. **non-dance content**: If the video is a cartoon, movie clip, sports, random vlog, or anything NOT related to classical dance, set "isValid" to false and provide a reason.
-3. **If VALID**: Proceed with the full analysis as described below.
+1. **Analyze the visual content first.** Determine if the video contains surveillance-relevant content (people, objects, activities).
+2. **Non-relevant content**: If the video is clearly a movie/TV clip, animation, or content with no surveillance value, set "isValid" to false and provide a reason.
+3. **If VALID**: Proceed with the full threat analysis as described above.
 
 Return the output strictly as a JSON object containing:
-1. "isValid": boolean (true if dance, false otherwise)
+1. "isValid": boolean (true if the video has surveillance-relevant content, false otherwise)
 2. "rejectionReason": string (if invalid, explain why)
-3. The identified dance style (if valid)
-4. An array of segments with proper timing (if valid)
-5. A storyline that weaves together all the mudras and their meanings in sequence (if valid)
+3. The scene type description (if valid) - e.g., "Street Surveillance", "Indoor Camera", "Parking Lot"
+4. An array of segments with proper timing and threat classification (if valid)
+5. An incident summary that describes the overall security assessment (if valid)
 `;
 
 /**
@@ -94,11 +104,9 @@ Return the output strictly as a JSON object containing:
 const fileToGenerativePart = async (
   filePath: string,
 ): Promise<{ base64Data: string; mimeType: string }> => {
-  // Read the video file as buffer
   const videoBuffer = await fs.promises.readFile(filePath);
   const base64Data = videoBuffer.toString("base64");
 
-  // Get file extension to determine MIME type
   const fileExtension = filePath.split(".").pop()?.toLowerCase();
   const mimeTypeMap: { [key: string]: string } = {
     mp4: "video/mp4",
@@ -117,27 +125,25 @@ const fileToGenerativePart = async (
 /**
  * Validate and fix segment timing to ensure realistic durations
  */
-const validateSegmentTiming = (segments: DanceSegment[]): DanceSegment[] => {
+const validateSegmentTiming = (segments: ThreatSegment[]): ThreatSegment[] => {
   if (!segments || segments.length === 0) return segments;
 
-  const MIN_DURATION = 1.0; // Minimum 1 second per segment
+  const MIN_DURATION = 1.0;
   const sorted = [...segments].sort((a, b) => a.startTime - b.startTime);
-  const validated: DanceSegment[] = [];
+  const validated: ThreatSegment[] = [];
 
   for (let i = 0; i < sorted.length; i++) {
     const current = sorted[i];
     const duration = current.endTime - current.startTime;
 
-    // If segment is too short, try to merge with next or extend
     if (duration < MIN_DURATION && i < sorted.length - 1) {
       const next = sorted[i + 1];
-      // Merge current with next
       validated.push({
         ...current,
         endTime: next.endTime,
         description: `${current.description} ${next.description}`,
       });
-      i++; // Skip next since we merged it
+      i++;
     } else {
       validated.push(current);
     }
@@ -147,7 +153,7 @@ const validateSegmentTiming = (segments: DanceSegment[]): DanceSegment[] => {
 };
 
 /**
- * Analyze a video using Gemini AI
+ * Analyze a CCTV video using Gemini AI
  *
  * @param videoPath - Full path to the video file on disk
  * @param prompt - Custom prompt for analysis (optional)
@@ -156,9 +162,9 @@ const validateSegmentTiming = (segments: DanceSegment[]): DanceSegment[] => {
 export const analyzeVideoWithML = async (
   videoPath: string,
   prompt?: string,
-): Promise<DanceAnalysisResult> => {
+): Promise<ThreatAnalysisResult> => {
   try {
-    console.log("🤖 Starting ML analysis for:", videoPath);
+    console.log("🤖 Starting ML threat analysis for:", videoPath);
 
     // 1. Convert video file to Base64
     const { base64Data, mimeType } = await fileToGenerativePart(videoPath);
@@ -170,17 +176,17 @@ export const analyzeVideoWithML = async (
         isValid: {
           type: Type.BOOLEAN,
           description:
-            "Set to true if the video is definitely Indian Classical Dance. Set to false for cartoons, random videos, or non-dance content.",
+            "Set to true if the video contains surveillance-relevant content. Set to false for animations, movie clips, or non-relevant content.",
         },
         rejectionReason: {
           type: Type.STRING,
           description:
-            "If isValid is false, explain why (e.g., 'Video is a cartoon', 'No dance detected').",
+            "If isValid is false, explain why (e.g., 'Video is an animation', 'No surveillance-relevant content detected').",
         },
-        danceStyle: {
+        sceneType: {
           type: Type.STRING,
           description:
-            "The likely style of dance (e.g., Bharatanatyam, Odissi). Null if invalid.",
+            "The type of surveillance scene (e.g., 'Street Surveillance', 'Indoor Camera', 'Parking Lot', 'Mall Corridor'). Null if invalid.",
         },
         segments: {
           type: Type.ARRAY,
@@ -189,43 +195,43 @@ export const analyzeVideoWithML = async (
             properties: {
               startTime: {
                 type: Type.NUMBER,
-                description: "Start time of the gesture in seconds",
+                description: "Start time of the detected event in seconds",
               },
               endTime: {
                 type: Type.NUMBER,
-                description: "End time of the gesture in seconds",
+                description: "End time of the detected event in seconds",
               },
-              mudraName: {
+              threatType: {
                 type: Type.STRING,
-                description: "Sanskrit name of the Mudra or 'Transition'",
+                description: "Type of threat detected (e.g., 'Physical Fight', 'Sharp Object Detected', 'Crowd Gathering', 'Normal Activity', 'Suspicious Movement')",
               },
-              meaning: {
+              severity: {
                 type: Type.STRING,
-                description: "Brief meaning or context",
+                description: "Severity level: LOW, MEDIUM, HIGH, or CRITICAL",
               },
-              expression: {
+              alertCategory: {
                 type: Type.STRING,
-                description: "Facial expression or Rasa",
+                description: "Category of alert: CROWD, WEAPON, VIOLENCE, or SUSPICIOUS",
               },
               description: {
                 type: Type.STRING,
-                description: "A continuous description of the movement",
+                description: "Detailed description of what is happening in this segment",
               },
             },
             required: [
               "startTime",
               "endTime",
-              "mudraName",
-              "meaning",
-              "expression",
+              "threatType",
+              "severity",
+              "alertCategory",
               "description",
             ],
           },
         },
-        storyline: {
+        incidentSummary: {
           type: Type.STRING,
           description:
-            "A cohesive narrative that weaves together all the mudras and their meanings in sequence, telling the story of the performance",
+            "A comprehensive incident summary describing the overall security assessment, key threats detected, and recommended response level",
         },
       },
       required: ["isValid"],
@@ -233,12 +239,12 @@ export const analyzeVideoWithML = async (
 
     // 3. Call Gemini API with Retry Logic
     const MAX_RETRIES = 5;
-    const INITIAL_BACKOFF = 5000; // 5 seconds
+    const INITIAL_BACKOFF = 5000;
 
     let attempt = 0;
     const customPrompt =
       prompt ||
-      "Analyze this dance video continuously. Create segments that are AT LEAST 1.5-3 seconds long each. Each mudra or movement should have realistic timing (2-4 seconds for held poses, 1-2 seconds for transitions). Ensure captions flow seamlessly without flickering or rapid changes.";
+      "Analyze this CCTV footage for threats. Detect crowds, sharp objects, weapons, fights, violence, or any suspicious activity. Create segments that are AT LEAST 1.5-3 seconds long each. Include severity levels (LOW/MEDIUM/HIGH/CRITICAL) and alert categories (CROWD/WEAPON/VIOLENCE/SUSPICIOUS) for each detection.";
 
     while (attempt < MAX_RETRIES) {
       try {
@@ -248,7 +254,6 @@ export const analyzeVideoWithML = async (
           );
         }
 
-        // Get Gemini client (will fetch API key from database)
         const geminiClient = await getGeminiClient();
 
         const response = await geminiClient.models.generateContent({
@@ -282,15 +287,15 @@ export const analyzeVideoWithML = async (
           throw new Error("No response from AI model");
         }
 
-        console.log("✅ ML analysis completed");
+        console.log("✅ ML threat analysis completed");
 
-        const parsed = JSON.parse(textResponse) as DanceAnalysisResult;
+        const parsed = JSON.parse(textResponse) as ThreatAnalysisResult;
 
         // CHECK VALIDITY FIRST
         if (parsed.isValid === false) {
           console.warn(`⚠️ Video rejected by ML: ${parsed.rejectionReason}`);
           throw new Error(
-            `Video Rejected: ${parsed.rejectionReason || "Content does not appear to be Indian Classical Dance."}`,
+            `Video Rejected: ${parsed.rejectionReason || "Content does not contain surveillance-relevant footage."}`,
           );
         }
 
@@ -304,18 +309,14 @@ export const analyzeVideoWithML = async (
       } catch (error: any) {
         attempt++;
 
-        // Detailed error logging
         console.error(`❌ Attempt ${attempt} failed:`, error?.message || error);
 
-        // Check for rate limits (429 or RESOURCE_EXHAUSTED)
         const isRateLimit =
           error?.status === 429 ||
           error?.status === "RESOURCE_EXHAUSTED" ||
           /quota|rate limit/i.test(error?.message || "");
 
         if (isRateLimit && attempt < MAX_RETRIES) {
-          // Exponential backoff with jitter: waitTime = (base * 2^attempt) + random_jitter
-          // Base 5s -> 10s, 20s, 40s, 80s
           const backoff = INITIAL_BACKOFF * Math.pow(2, attempt - 1);
           const jitter = Math.random() * 1000;
           const waitTime = backoff + jitter;
@@ -327,7 +328,6 @@ export const analyzeVideoWithML = async (
           continue;
         }
 
-        // If not rate limit or max retries reached
         const msg = error?.message || "";
         if (isRateLimit) {
           throw new Error(
@@ -351,7 +351,6 @@ export const analyzeVideoWithML = async (
  */
 export const getAvailableModels = async (): Promise<string[]> => {
   try {
-    // Available Gemini models
     return [
       "gemini-3-flash-preview",
       "gemini-2.0-flash-exp",
@@ -367,25 +366,18 @@ export const getAvailableModels = async (): Promise<string[]> => {
 /**
  * Unified video analysis function
  * Routes to either Gemini API or local model based on modelType
- *
- * @param videoPath - Full path to the video file
- * @param modelType - 'gemini' or 'local'
- * @param prompt - Optional custom prompt (only used for Gemini)
- * @returns Analysis result
  */
 export const analyzeVideo = async (
   videoPath: string,
   modelType: "gemini" | "local" = "gemini",
   prompt?: string,
-): Promise<DanceAnalysisResult> => {
+): Promise<ThreatAnalysisResult> => {
   console.log(`🤖 Analyzing video with ${modelType} model`);
 
   if (modelType === "local") {
-    // Import local model service dynamically to avoid circular dependencies
     const { analyzeVideoWithLocalModel } = await import("./localModelService");
     return analyzeVideoWithLocalModel(videoPath);
   } else {
-    // Use Gemini API
     return analyzeVideoWithML(videoPath, prompt);
   }
 };

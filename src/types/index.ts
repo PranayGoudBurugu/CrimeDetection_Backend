@@ -1,5 +1,5 @@
 /**
- * Type Definitions for Nithya Analysis Backend
+ * Type Definitions for CrimeWatch AI Backend
  *
  * These interfaces define the shape of our data throughout the application.
  * TypeScript uses these to catch errors at compile time.
@@ -53,31 +53,35 @@ export interface AnalysisListResponse {
 }
 
 // ============================================
-// DANCE ANALYSIS TYPES
+// THREAT ANALYSIS TYPES
 // ============================================
 
 /**
- * A single segment in a dance video analysis
+ * A single threat segment detected in CCTV footage
  */
-export interface DanceSegment {
+export interface ThreatSegment {
   startTime: number;
   endTime: number;
-  mudraName: string;
-  meaning: string;
-  expression: string;
+  threatType: string;
+  severity: string; // LOW, MEDIUM, HIGH, CRITICAL
+  alertCategory: string; // CROWD, WEAPON, VIOLENCE, SUSPICIOUS
   description: string;
 }
 
 /**
- * Complete dance analysis result from Gemini AI
+ * Complete threat analysis result from Gemini AI
  */
-export interface DanceAnalysisResult {
-  danceStyle: string;
-  segments: DanceSegment[];
-  storyline: string;
-  isValid?: boolean; // New field to indicate if the video is valid for analysis
-  rejectionReason?: string; // Reason for rejection if isValid is false
+export interface ThreatAnalysisResult {
+  sceneType: string;
+  segments: ThreatSegment[];
+  incidentSummary: string;
+  isValid?: boolean;
+  rejectionReason?: string;
 }
+
+// Keep backward-compatible aliases
+export type DanceSegment = ThreatSegment;
+export type DanceAnalysisResult = ThreatAnalysisResult;
 
 // ============================================
 // ML API TYPES
@@ -96,7 +100,6 @@ export interface MLConfig {
 
 /**
  * ML API response structure
- * (This can be customized based on your actual ML API response)
  */
 export interface MLResponse {
   candidates?: Array<{

@@ -19,9 +19,9 @@ const FONT_PATH = path.join(process.cwd(), "src/assets/fonts/Roboto-Regular.ttf"
  * Video Annotation Service
  *
  * This service creates annotated videos with text overlays showing:
- * - Mudra name
- * - Meaning
- * - Expression/Emotion
+ * - Threat type
+ * - Severity level
+ * - Alert category
  */
 
 export interface AnnotationConfig {
@@ -67,12 +67,15 @@ const generateDrawtextFilters = (
     const filters: string[] = [];
 
     result.segments.forEach((segment) => {
-        const { startTime, endTime, mudraName, meaning, expression } = segment;
+        const { startTime, endTime } = segment;
+        const threatType = (segment as any).threatType || (segment as any).mudraName || 'Unknown Threat';
+        const severity = (segment as any).severity || (segment as any).meaning || 'MEDIUM';
+        const alertCategory = (segment as any).alertCategory || (segment as any).expression || 'SUSPICIOUS';
 
         // Format the text lines
-        const line1 = `Mudra: ${mudraName}`;
-        const line2 = `Meaning: ${meaning}`;
-        const line3 = `Expression: ${expression}`;
+        const line1 = `Threat: ${threatType}`;
+        const line2 = `Severity: ${severity}`;
+        const line3 = `Category: ${alertCategory}`;
 
         // Create drawtext filter for each line
         [line1, line2, line3].forEach((text, index) => {
@@ -97,10 +100,10 @@ const generateDrawtextFilters = (
 };
 
 /**
- * Create an annotated video with mudra information overlaid
+ * Create an annotated video with threat information overlaid
  *
  * @param inputVideoPath - Path to the original video file
- * @param analysisResult - The dance analysis result with segments
+ * @param analysisResult - The threat analysis result with segments
  * @param outputDir - Directory to save the annotated video
  * @param config - Optional styling configuration
  * @returns Path to the annotated video file
@@ -205,9 +208,9 @@ export const generateSubtitleFile = (
             return [
                 index + 1,
                 `${formatTime(segment.startTime)} --> ${formatTime(segment.endTime)}`,
-                `Mudra: ${segment.mudraName}`,
-                `Meaning: ${segment.meaning}`,
-                `Expression: ${segment.expression}`,
+                `Threat: ${(segment as any).threatType || (segment as any).mudraName || 'Unknown'}`,
+                `Severity: ${(segment as any).severity || (segment as any).meaning || 'MEDIUM'}`,
+                `Category: ${(segment as any).alertCategory || (segment as any).expression || 'SUSPICIOUS'}`,
                 "",
             ].join("\n");
         })
