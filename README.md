@@ -1,297 +1,118 @@
-# Nithya Analysis Backend
+# ⚙️ CrimeWatch AI — Backend
 
-Backend API for analyzing dance videos using Google Gemini AI and PostgreSQL.
+> Node.js + Express + TypeScript backend for CrimeWatch AI.  
+> **For full setup instructions, see the [Frontend README](https://github.com/PranayGoudBurugu/CrimeDetection_Frontend/blob/main/README.md).**
 
-## 🚀 Features
+---
 
-- **Video Upload**: Accept video files via multipart/form-data
-- **AI Analysis**: Analyze videos using Google Gemini 1.5 Flash/Pro
-- **Database Storage**: Store videos and analysis results in PostgreSQL
-- **History**: Retrieve analysis history for frontend display
-- **RESTful API**: Clean, documented API endpoints
-
-## 📋 Prerequisites
-
-- **Node.js** 18+ and npm
-- **PostgreSQL** 17 (or compatible version)
-- **Google Gemini API Key** (Get from [Google AI Studio](https://makersuite.google.com/app/apikey))
-
-## 🛠️ Setup Instructions
-
-### 1. Install PostgreSQL
-
-**macOS:**
-```bash
-brew install postgresql@17
-brew services start postgresql@17
-```
-
-**Windows/Linux:**
-Download from [postgresql.org](https://www.postgresql.org/download/)
-
-### 2. Create Database
+## Quick Start (Local)
 
 ```bash
-# Access PostgreSQL
-psql postgres
-
-# Create database
-CREATE DATABASE nithya_analysis;
-
-# Create user (optional)
-CREATE USER nithya_user WITH PASSWORD 'your_secure_password';
-
-# Grant privileges
-GRANT ALL PRIVILEGES ON DATABASE nithya_analysis TO nithya_user;
-
-# Exit
-\q
+git clone https://github.com/PranayGoudBurugu/CrimeDetection_Backend.git
+cd CrimeDetection_Backend
+npm install
+cp .env.example .env    # Then fill in your values
+npx prisma db push      # Sync DB schema
+npm run dev             # Starts on http://localhost:5005
 ```
 
-### 3. Run Database Schema
+---
 
-```bash
-# Run the schema file to create tables
-psql -U postgres -d nithya_analysis -f database/schema.sql
+## Environment Variables
 
-# Or if you created a user:
-psql -U nithya_user -d nithya_analysis -f database/schema.sql
-```
-
-### 4. Configure Environment Variables
-
-Edit the `.env` file:
+Create a `.env` file in the root:
 
 ```env
-PORT=5005
-NODE_ENV=development
+# Database (Supabase)
+DATABASE_URL="postgresql://postgres.[ref]:[password]@aws-0-ap-south-1.pooler.supabase.com:6543/postgres?pgbouncer=true"
+DIRECT_URL="postgresql://postgres.[ref]:[password]@aws-0-ap-south-1.pooler.supabase.com:5432/postgres"
 
-# PostgreSQL Database
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=nithya_analysis
-DB_USER=postgres
-DB_PASSWORD=your_password_here
+# ImageKit (video storage)
+IMAGEKIT_PRIVATE_KEY=private_XXXXXXXX
+IMAGEKIT_PUBLIC_KEY=public_XXXXXXXX
+IMAGEKIT_URL_ENDPOINT=https://ik.imagekit.io/yourusername
 
-# Google Gemini API
-GEMINI_API_KEY=your_gemini_api_key_here
+# Google Gemini AI
+GEMINI_API_KEY=AIzaSyXXXXXXXXXXXXXX
+
+# Server
+FRONTEND_URL=http://localhost:3000
+PUBLIC_BACKEND_URL=http://localhost:5005   # Change to Vercel URL in production
+
+# Twilio SMS
+TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_MESSAGING_SERVICE_SID=MGxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_TO_PHONE=+91XXXXXXXXXX
+
+# Gmail Email Alerts
+ALERT_EMAIL_USER=your-gmail@gmail.com
+ALERT_EMAIL_PASS=xxxxxxxxxxxxxxxxxxxx   # Gmail App Password (no spaces)
+ALERT_EMAIL_TO=your-gmail@gmail.com
 ```
 
-**Get Gemini API Key:**
-1. Go to [Google AI Studio](https://makersuite.google.com/app/apikey)
-2. Create a new API key
-3. Copy and paste into `.env`
+---
 
-### 5. Install Dependencies
+## API Endpoints
 
-```bash
-npm install
-```
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/getanalysis` | Upload video + run ML analysis |
+| `GET` | `/history` | Get all past analyses |
+| `GET` | `/analysis/:id` | Get a specific analysis |
+| `DELETE` | `/analysis/:id` | Delete an analysis |
+| `GET` | `/watch/:token` | View expiring video (no auth) |
+| `GET` | `/stream/uploads/:filename` | Stream video bytes (Range support) |
+| `GET` | `/settings` | Get admin settings |
+| `PUT` | `/settings` | Update Gemini API key |
+| `GET` | `/health` | Health check |
 
-### 6. Start the Server
+---
 
-**Development mode (with auto-reload):**
-```bash
-npm run dev
-```
+## Gemini Model Fallback Chain
 
-**Production mode:**
-```bash
-npm run build
-npm start
-```
+The app tries models in this order when one fails:
+1. `gemini-2.5-flash` — current stable, fastest
+2. `gemini-2.5-flash-preview-09-2025` — preview, separate quota
+3. `gemini-2.0-flash-001` — deprecated but operational fallback
 
-The server will start on `http://localhost:5005`
+**Retry logic:**
+- `429 Quota exceeded` → waits **60 seconds** then retries
+- `503 Overload` → waits **6 seconds** then retries
 
-## 📡 API Endpoints
+---
 
-### **POST /getanalysis**
-Upload and analyze a video
-
-**Request:**
-- Method: `POST`
-- Content-Type: `multipart/form-data`
-- Body:
-  - `video`: Video file (required)
-  - `prompt`: Custom analysis prompt (optional)
-
-**Example using curl:**
-```bash
-curl -X POST http://localhost:5005/getanalysis \
-  -F "video=@/path/to/dance-video.mp4"
-```
-
-**Example with custom prompt:**
-```bash
-curl -X POST http://localhost:5005/getanalysis \
-  -F "video=@/path/to/dance-video.mp4" \
-  -F "prompt=Focus on identifying Bharatanatyam mudras"
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Video analysis completed successfully",
-  "data": {
-    "id": 1,
-    "video_filename": "dance-video.mp4",
-    "status": "completed",
-    "gemini_response": {
-      "analysis": {
-        "danceForm": "Bharatanatyam",
-        "movements": [...],
-        "mudras": [...],
-        "rating": 8.5
-      }
-    },
-    "created_at": "2026-01-05T18:00:00Z"
-  }
-}
-```
-
-### **GET /history**
-Get analysis history
-
-**Query Parameters:**
-- `status`: Filter by status (`pending`, `processing`, `completed`, `failed`)
-- `limit`: Number of results (default: 50)
-- `offset`: Pagination offset (default: 0)
-
-**Example:**
-```bash
-curl http://localhost:5005/history?status=completed&limit=10
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "count": 10,
-  "data": [...]
-}
-```
-
-### **GET /analysis/:id**
-Get specific analysis by ID
-
-**Example:**
-```bash
-curl http://localhost:5005/analysis/1
-```
-
-### **DELETE /analysis/:id**
-Delete analysis and video file
-
-**Example:**
-```bash
-curl -X DELETE http://localhost:5005/analysis/1
-```
-
-### **GET /health**
-Health check endpoint
-
-```bash
-curl http://localhost:5005/health
-```
-
-## 📁 Project Structure
+## SMS Alert Format
 
 ```
-nithya-analysis-backend/
-├── database/
-│   └── schema.sql              # PostgreSQL database schema
-├── src/
-│   ├── config/
-│   │   ├── database.ts         # Database connection pool
-│   │   └── multer.ts           # File upload configuration
-│   ├── controllers/
-│   │   └── analysisController.ts  # Request handlers
-│   ├── middleware/
-│   │   └── errorHandler.ts    # Error handling middleware
-│   ├── routes/
-│   │   └── analysisRoutes.ts  # API routes
-│   ├── services/
-│   │   └── geminiService.ts   # Gemini AI integration
-│   ├── types/
-│   │   └── index.ts           # TypeScript type definitions
-│   └── server.ts              # Main server file
-├── uploads/                    # Uploaded videos (auto-created)
-├── .env                        # Environment variables
-├── package.json
-├── tsconfig.json
-└── README.md
+CrimeWatch ALERT: {threat_type} ({severity}) @ {location}.
+Map: https://maps.google.com/?q={lat},{lng}
+Footage: https://your-backend.vercel.app/watch/{token}
 ```
 
-## 🧪 Testing the API
+The watch link is a **30-minute expiring token** — no login required to view.
 
-### Using Frontend (React)
+---
 
-```typescript
-const handleAnalysis = async (videoFile: File) => {
-  const formData = new FormData();
-  formData.append('video', videoFile);
-  
-  const response = await fetch('http://localhost:5005/getanalysis', {
-    method: 'POST',
-    body: formData
-  });
-  
-  const data = await response.json();
-  console.log(data);
-};
-```
+## Email Alert
 
-### Using Postman
+Sends a rich HTML email via Gmail SMTP with:
+- Threat type, severity, category
+- GPS location + Google Maps link
+- "Watch Footage Now" button (opens auto-playing video)
 
-1. Create a new POST request to `http://localhost:5005/getanalysis`
-2. Go to Body tab
-3. Select `form-data`
-4. Add key: `video`, type: `File`, select your video file
-5. Click Send
+> Setup: Generate a Gmail **App Password** at https://myaccount.google.com/apppasswords
 
-## 🔧 Troubleshooting
+---
 
-### Database Connection Failed
-- Check PostgreSQL is running: `brew services list`
-- Verify credentials in `.env` match your PostgreSQL setup
-- Test connection: `psql -U postgres -d nithya_analysis`
+## Deploy to Vercel
 
-### Gemini API Error
-- Verify your API key is correct
-- Check you have API quota available
-- Ensure video file size is under limits
+1. Push to GitHub (already done)
+2. Go to https://vercel.com → Import this repo
+3. Add all `.env` variables in Vercel's Environment Variables panel
+4. Set `PUBLIC_BACKEND_URL` = your Vercel deployment URL
+5. Deploy ✓
 
-### File Upload Failed
-- Check `uploads/` directory exists and is writable
-- Verify file size is under 100MB
-- Ensure MIME type is supported video format
+---
 
-### Port Already in Use
-- Change PORT in `.env` to a different value
-- Or kill the process using port 5005
-
-## 📝 Notes
-
-- **Video Storage**: Videos are stored in `uploads/` directory
-- **Max File Size**: 100MB (configurable in `src/config/multer.ts`)
-- **Supported Formats**: MP4, MPEG, MOV, AVI, MKV, WebM
-- **Database**: Analysis results include full Gemini response as JSONB
-
-## 🔐 Security Considerations
-
-For production deployment:
-- Use environment-specific `.env` files
-- Implement authentication/authorization
-- Add rate limiting
-- Validate file types more strictly
-- Use HTTPS
-- Sanitize user inputs
-- Set up proper CORS policies
-
-## 📄 License
-
-ISC
-# nithya-analysis-backend
-# CrimeDetection_Backend
-# CrimeDetection_Backend
+*Full documentation: [Frontend README](https://github.com/PranayGoudBurugu/CrimeDetection_Frontend/blob/main/README.md)*
