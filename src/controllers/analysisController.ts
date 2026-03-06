@@ -227,9 +227,15 @@ export const getAnalysis = async (
       if (violenceAlert) {
         console.log("🚨 Violence detected! Sending SMS alert...");
 
-        // Generate a 30-min expiring video link (no login required)
+        // Generate a 30-min expiring video link using the CLOUD URL (works on Vercel)
         const { createVideoToken, getVideoLinkUrl } = await import("../services/videoLinkService");
-        const videoToken = createVideoToken(videoFile.path);
+        const lat = req.body?.lat ? parseFloat(req.body.lat) : undefined;
+        const lng = req.body?.lng ? parseFloat(req.body.lng) : undefined;
+        const videoToken = createVideoToken(videoUrl, {          // videoUrl = ImageKit/cloud URL
+          location: req.body?.location,
+          lat,
+          lng,
+        });
         const videoWatchLink = getVideoLinkUrl(videoToken);
 
         // Get location and alertPhone from request body (sent by frontend)
@@ -239,8 +245,10 @@ export const getAnalysis = async (
         const smsResult = await sendThreatAlert({
           ...violenceAlert,
           incidentSummary: (mlResponse as DanceAnalysisResult).incidentSummary,
-          videoUrl: videoWatchLink,  // 30-min expiring auto-play link
-          location: location,
+          videoUrl: videoWatchLink,
+          location,
+          lat,
+          lng,
           toPhone: alertPhone,
         });
 

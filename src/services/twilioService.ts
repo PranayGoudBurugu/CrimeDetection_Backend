@@ -16,6 +16,8 @@ interface ThreatAlertPayload {
     incidentSummary?: string;
     videoUrl?: string;
     location?: string;
+    lat?: number;
+    lng?: number;
     toPhone?: string;
     timestamp?: string;
 }
@@ -56,16 +58,19 @@ export const sendThreatAlert = async (
         return { success: false, error: "Missing target phone number" };
     }
 
-    // Single-segment SMS: must be under 160 chars for Twilio Trial
+    // Single-segment SMS: keep body tight (Trial adds ~38-char prefix)
     const loc = payload.location && payload.location !== "Unknown Location"
         ? ` @ ${payload.location}` : "";
-    const link = payload.videoUrl ? `\n${payload.videoUrl}` : "";
+    const mapsLine = payload.lat && payload.lng
+        ? `\nMap: https://maps.google.com/?q=${payload.lat.toFixed(4)},${payload.lng.toFixed(4)}`
+        : "";
+    const footageLine = payload.videoUrl ? `\nFootage: ${payload.videoUrl}` : "";
 
-    const message = `CrimeWatch ALERT: ${payload.threatType} (${payload.severity})${loc}. Open footage:${link}`;
+    const message = `CrimeWatch ALERT: ${payload.threatType} (${payload.severity})${loc}.${mapsLine}${footageLine}`;
 
-    console.log(`📝 SMS message (${message.length} chars): ${message.slice(0, 80)}...`);
+    console.log(`📝 SMS (${message.length} chars): ${message.slice(0, 100)}...`);
     if (message.length > 160) {
-        console.warn(`⚠️ SMS is ${message.length} chars — may exceed 1 segment on Trial`);
+        console.warn(`⚠️ SMS is ${message.length} chars — splits into ${Math.ceil(message.length / 153)} segments`);
     }
 
 
