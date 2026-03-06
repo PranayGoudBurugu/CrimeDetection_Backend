@@ -149,6 +149,10 @@ app.use("/", analysisRoutes);
 // Settings routes (application settings management)
 app.use("/", settingsRoutes);
 
+// Phone verification routes (Twilio Caller ID verification)
+import phoneVerifyRoutes from "./routes/phoneVerifyRoutes";
+app.use("/", phoneVerifyRoutes);
+
 // ============================================
 // VIDEO WATCH ROUTES (expiring links for SMS alerts)
 // ============================================
