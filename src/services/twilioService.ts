@@ -56,33 +56,22 @@ export const sendThreatAlert = async (
         return { success: false, error: "Missing target phone number" };
     }
 
-    // Compose the alert message
-    const now = payload.timestamp || new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+    // Single-segment SMS: must be under 160 chars for Twilio Trial
+    const loc = payload.location && payload.location !== "Unknown Location"
+        ? ` @ ${payload.location}` : "";
+    const link = payload.videoUrl ? `\n${payload.videoUrl}` : "";
 
-    let message = `🚨 *CrimeWatch AI ALERT* 🚨\n\n`;
-    message += `⚠️ Threat: ${payload.threatType}\n`;
-    message += `🔴 Severity: ${payload.severity}\n`;
-    message += `📋 Category: ${payload.alertCategory}\n`;
-    message += `📝 ${payload.description}\n\n`;
+    const message = `CrimeWatch ALERT: ${payload.threatType} (${payload.severity})${loc}. Open footage:${link}`;
 
-    if (payload.location) {
-        message += `📍 Location: ${payload.location}\n`;
+    console.log(`📝 SMS message (${message.length} chars): ${message.slice(0, 80)}...`);
+    if (message.length > 160) {
+        console.warn(`⚠️ SMS is ${message.length} chars — may exceed 1 segment on Trial`);
     }
 
-    message += `🕐 Time: ${now}\n`;
-
-    if (payload.incidentSummary) {
-        message += `\n📄 Incident Summary:\n${payload.incidentSummary}\n`;
-    }
-
-    if (payload.videoUrl) {
-        message += `\n🎥 View Footage:\n${payload.videoUrl}\n`;
-    }
-
-    message += `\n⚡ Immediate response recommended.`;
 
     try {
-        console.log(`📱 Sending SMS alert to ${targetPhone}...`);
+        console.log(`📱 Sending SMS to: ${targetPhone}`);
+        console.log(`🔑 Using MessagingServiceSid: ${messagingServiceSid}`);
 
         const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
 
@@ -98,19 +87,20 @@ export const sendThreatAlert = async (
                 Authorization: "Basic " + Buffer.from(`${accountSid}:${authToken}`).toString("base64"),
                 "Content-Type": "application/x-www-form-urlencoded",
             },
-
-
             body: body.toString(),
         });
 
         const result: any = await response.json();
+        console.log(`📨 Twilio response status: ${response.status}`);
+        console.log(`📨 Twilio response body:`, JSON.stringify(result, null, 2));
 
         if (response.ok) {
-            console.log(`✅ SMS alert sent successfully! SID: ${result.sid}`);
+            console.log(`✅ SMS sent! SID: ${result.sid} | Status: ${result.status}`);
             return { success: true, messageSid: result.sid };
         } else {
-            console.error(`❌ Twilio API error: ${result.message || result.code}`);
-            return { success: false, error: result.message || "Twilio API error" };
+            const errMsg = `Code ${result.code}: ${result.message} — ${result.more_info || ''}`;
+            console.error(`❌ Twilio error: ${errMsg}`);
+            return { success: false, error: errMsg };
         }
     } catch (error: any) {
         console.error("❌ Failed to send SMS alert:", error.message);

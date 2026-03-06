@@ -227,9 +227,10 @@ export const getAnalysis = async (
       if (violenceAlert) {
         console.log("🚨 Violence detected! Sending SMS alert...");
 
-        // Get video URL for the SMS
-        const { getVideoUrl } = await import("../services/storageService");
-        const videoLink = getVideoUrl(videoFile.path);
+        // Generate a 30-min expiring video link (no login required)
+        const { createVideoToken, getVideoLinkUrl } = await import("../services/videoLinkService");
+        const videoToken = createVideoToken(videoFile.path);
+        const videoWatchLink = getVideoLinkUrl(videoToken);
 
         // Get location and alertPhone from request body (sent by frontend)
         const location = req.body?.location || "Unknown Location";
@@ -238,7 +239,7 @@ export const getAnalysis = async (
         const smsResult = await sendThreatAlert({
           ...violenceAlert,
           incidentSummary: (mlResponse as DanceAnalysisResult).incidentSummary,
-          videoUrl: videoLink,
+          videoUrl: videoWatchLink,  // 30-min expiring auto-play link
           location: location,
           toPhone: alertPhone,
         });
@@ -246,6 +247,25 @@ export const getAnalysis = async (
         alertSent = smsResult.success;
         if (alertSent) {
           console.log("✅ SMS alert sent successfully");
+        }
+
+        // Also send email alert (works for Indian numbers — no DLT required)
+        const alertEmail = req.body?.alertEmail;
+        try {
+          const { sendEmailAlert } = await import("../services/emailService");
+          const emailResult = await sendEmailAlert({
+            ...violenceAlert,
+            incidentSummary: (mlResponse as DanceAnalysisResult).incidentSummary,
+            videoUrl: videoWatchLink,
+            location,
+            toEmail: alertEmail,
+          });
+          if (emailResult.success) {
+            console.log("✅ Email alert sent successfully");
+            alertSent = true; // mark success even if SMS failed
+          }
+        } catch (emailErr: any) {
+          console.warn("⚠️ Email alert failed:", emailErr.message);
         }
       }
     } catch (alertError) {

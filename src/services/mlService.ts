@@ -237,109 +237,107 @@ export const analyzeVideoWithML = async (
       required: ["isValid"],
     };
 
-    // 3. Call Gemini API with Retry Logic
-    const MAX_RETRIES = 5;
-    const INITIAL_BACKOFF = 5000;
+    // 3. Call Gemini API — model fallback chain with retry on overload
+    // Source: https://ai.google.dev/gemini-api/docs/models
+    // gemini-2.5-flash = current stable, supports video
+    // gemini-2.5-flash-preview-09-2025 = preview variant
+    // gemini-2.0-flash-001 = deprecated but still operational fallback
+    const MODEL_CHAIN = [
+      "gemini-2.5-flash",
+      "gemini-2.5-flash-preview-09-2025",
+      "gemini-2.0-flash-001",
+    ];
+    const MAX_RETRIES_PER_MODEL = 2;
+    // 429 = quota exceeded (needs ~60s), 503 = overload (needs ~6s)
+    const QUOTA_BACKOFF_MS = 60000;
+    const OVERLOAD_BACKOFF_MS = 6000;
 
-    let attempt = 0;
     const customPrompt =
       prompt ||
       "Analyze this CCTV footage for threats. Detect crowds, sharp objects, weapons, fights, violence, or any suspicious activity. Create segments that are AT LEAST 1.5-3 seconds long each. Include severity levels (LOW/MEDIUM/HIGH/CRITICAL) and alert categories (CROWD/WEAPON/VIOLENCE/SUSPICIOUS) for each detection.";
 
-    while (attempt < MAX_RETRIES) {
-      try {
-        if (attempt > 0) {
-          console.log(
-            `Using model: gemini-3-flash-preview (Attempt ${attempt + 1}/${MAX_RETRIES})`,
-          );
-        }
+    let lastError: Error = new Error("Analysis failed");
 
-        const geminiClient = await getGeminiClient();
+    for (const modelName of MODEL_CHAIN) {
+      let attempt = 0;
 
-        const response = await geminiClient.models.generateContent({
-          model: "gemini-3-flash-preview",
-          contents: [
-            {
-              role: "user",
-              parts: [
-                {
-                  inlineData: {
-                    mimeType: mimeType,
-                    data: base64Data,
-                  },
-                },
-                {
-                  text: customPrompt,
-                },
-              ],
+      while (attempt < MAX_RETRIES_PER_MODEL) {
+        try {
+          console.log(`🤖 Trying model: ${modelName} (attempt ${attempt + 1}/${MAX_RETRIES_PER_MODEL})`);
+
+          const geminiClient = await getGeminiClient();
+
+          const response = await geminiClient.models.generateContent({
+            model: modelName,
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  { inlineData: { mimeType: mimeType, data: base64Data } },
+                  { text: customPrompt },
+                ],
+              },
+            ],
+            config: {
+              systemInstruction: SYSTEM_INSTRUCTION,
+              responseMimeType: "application/json",
+              responseSchema: responseSchema,
+              temperature: 0.4,
             },
-          ],
-          config: {
-            systemInstruction: SYSTEM_INSTRUCTION,
-            responseMimeType: "application/json",
-            responseSchema: responseSchema,
-            temperature: 0.4,
-          },
-        });
+          });
 
-        const textResponse = response.text;
-        if (!textResponse) {
-          throw new Error("No response from AI model");
+          const textResponse = response.text;
+          if (!textResponse) throw new Error("Empty response from AI model");
+
+          console.log(`✅ ML analysis completed with ${modelName}`);
+
+          const parsed = JSON.parse(textResponse) as ThreatAnalysisResult;
+
+          // CHECK VALIDITY FIRST
+          if (parsed.isValid === false) {
+            console.warn(`⚠️ Video rejected by ML: ${parsed.rejectionReason}`);
+            throw new Error(
+              `Video Rejected: ${parsed.rejectionReason || "Content does not contain surveillance-relevant footage."}`,
+            );
+          }
+
+          const validatedSegments = validateSegmentTiming(parsed.segments || []);
+          return { ...parsed, segments: validatedSegments };
+
+        } catch (error: any) {
+          attempt++;
+          const msg: string = error?.message || JSON.stringify(error) || "Unknown error";
+          const statusCode = error?.status || error?.code || 0;
+
+          console.error(`❌ ${modelName} attempt ${attempt} failed: ${msg.slice(0, 200)}`);
+
+          // Don't retry on video rejection — content won't change with retries
+          if (msg.includes("Video Rejected")) throw error;
+
+          const isQuotaError = statusCode === 429 || /quota|rate.?limit|exceeded/i.test(msg);
+          const isTransient =
+            isQuotaError ||
+            statusCode === 503 ||
+            /unavailable|overload|high demand|capacity|exhausted/i.test(msg);
+
+          if (isTransient && attempt < MAX_RETRIES_PER_MODEL) {
+            // Quota errors need much longer waits than overload errors
+            const baseWait = isQuotaError ? QUOTA_BACKOFF_MS : OVERLOAD_BACKOFF_MS;
+            const waitMs = baseWait * attempt + Math.random() * 2000;
+            console.warn(`⏳ ${isQuotaError ? "Quota" : "Overload"} error — waiting ${Math.round(waitMs / 1000)}s before retry ${modelName}...`);
+            await new Promise((r) => setTimeout(r, waitMs));
+            continue;
+          }
+
+          lastError = new Error(`[${modelName}] ${msg}`);
+          break; // move to the next model
         }
-
-        console.log("✅ ML threat analysis completed");
-
-        const parsed = JSON.parse(textResponse) as ThreatAnalysisResult;
-
-        // CHECK VALIDITY FIRST
-        if (parsed.isValid === false) {
-          console.warn(`⚠️ Video rejected by ML: ${parsed.rejectionReason}`);
-          throw new Error(
-            `Video Rejected: ${parsed.rejectionReason || "Content does not contain surveillance-relevant footage."}`,
-          );
-        }
-
-        // Post-process: Validate and fix segment timing
-        const validatedSegments = validateSegmentTiming(parsed.segments || []);
-
-        return {
-          ...parsed,
-          segments: validatedSegments,
-        };
-      } catch (error: any) {
-        attempt++;
-
-        console.error(`❌ Attempt ${attempt} failed:`, error?.message || error);
-
-        const isRateLimit =
-          error?.status === 429 ||
-          error?.status === "RESOURCE_EXHAUSTED" ||
-          /quota|rate limit/i.test(error?.message || "");
-
-        if (isRateLimit && attempt < MAX_RETRIES) {
-          const backoff = INITIAL_BACKOFF * Math.pow(2, attempt - 1);
-          const jitter = Math.random() * 1000;
-          const waitTime = backoff + jitter;
-
-          console.warn(
-            `⚠️ Rate limit hit. Waiting ${Math.round(waitTime / 1000)}s before retry...`,
-          );
-          await new Promise((resolve) => setTimeout(resolve, waitTime));
-          continue;
-        }
-
-        const msg = error?.message || "";
-        if (isRateLimit) {
-          throw new Error(
-            "Gemini free tier quota exceeded. Please wait a minute before trying again.",
-          );
-        }
-
-        throw new Error(`ML analysis failed: ${msg}`);
       }
+
+      console.warn(`⚠️ ${modelName} exhausted — trying next model in chain...`);
     }
 
-    throw new Error("Analysis failed after maximum retries");
+    throw new Error(`All Gemini models failed. Last error: ${lastError.message}`);
   } catch (error: any) {
     console.error("❌ Final ML Service Error:", error);
     throw error;
@@ -352,10 +350,9 @@ export const analyzeVideoWithML = async (
 export const getAvailableModels = async (): Promise<string[]> => {
   try {
     return [
-      "gemini-3-flash-preview",
-      "gemini-2.0-flash-exp",
-      "gemini-1.5-pro",
-      "gemini-1.5-flash",
+      "gemini-2.5-flash",
+      "gemini-2.5-flash-preview-09-2025",
+      "gemini-2.0-flash-001",
     ];
   } catch (error) {
     console.error("Error fetching models:", error);

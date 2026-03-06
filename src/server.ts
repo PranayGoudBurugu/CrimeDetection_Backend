@@ -150,6 +150,77 @@ app.use("/", analysisRoutes);
 app.use("/", settingsRoutes);
 
 // ============================================
+// VIDEO WATCH ROUTES (expiring links for SMS alerts)
+// ============================================
+import { getVideoByToken, buildVideoPlayerHtml } from "./services/videoLinkService";
+import fs from "fs";
+import path from "path";
+
+// Serve the auto-play player page (no auth required)
+app.get("/watch/:token", (req: Request, res: Response) => {
+  const { token } = req.params;
+  const entry = getVideoByToken(token);
+
+  if (!entry) {
+    res.status(410).send(`<!DOCTYPE html>
+<html><head><meta charset="UTF-8"/><title>Link Expired</title>
+<style>body{background:#0a0a0f;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center}h2{color:#f87171}p{color:rgba(255,255,255,0.5);margin-top:8px}</style>
+</head><body><div><h2>⏰ Link Expired</h2><p>This security footage link has expired.<br>Contact the security team for access.</p></div></body></html>`);
+    return;
+  }
+
+  res.setHeader("Content-Type", "text/html");
+  res.send(buildVideoPlayerHtml(entry));
+});
+
+// Stream the video file with Range support (for mobile seek)
+app.get("/stream/uploads/:filename", (req: Request, res: Response) => {
+  const { filename } = req.params;
+  const videoPath = path.join(process.cwd(), "uploads", filename);
+
+  if (!fs.existsSync(videoPath)) {
+    res.status(404).json({ error: "Video not found" });
+    return;
+  }
+
+  const stat = fs.statSync(videoPath);
+  const fileSize = stat.size;
+  const range = req.headers.range;
+
+  const ext = path.extname(filename).toLowerCase().replace(".", "");
+  const mimeTypes: Record<string, string> = {
+    mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime",
+    avi: "video/x-msvideo", mkv: "video/x-matroska",
+  };
+  const mimeType = mimeTypes[ext] || "video/mp4";
+
+  if (range) {
+    const parts = range.replace(/bytes=/, "").split("-");
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    const chunkSize = end - start + 1;
+
+    res.writeHead(206, {
+      "Content-Range": `bytes ${start}-${end}/${fileSize}`,
+      "Accept-Ranges": "bytes",
+      "Content-Length": chunkSize,
+      "Content-Type": mimeType,
+      "Access-Control-Allow-Origin": "*",
+    });
+    fs.createReadStream(videoPath, { start, end }).pipe(res);
+  } else {
+    res.writeHead(200, {
+      "Content-Length": fileSize,
+      "Content-Type": mimeType,
+      "Access-Control-Allow-Origin": "*",
+    });
+    fs.createReadStream(videoPath).pipe(res);
+  }
+});
+
+
+
+// ============================================
 // ERROR HANDLING MIDDLEWARE
 // ============================================
 
